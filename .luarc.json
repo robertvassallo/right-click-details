@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.2",
+  "workspace.library": [
+    "/mnt/DueceGigalow/SteamLibrary/steamapps/common/Transport Fever 2/res/scripts"
+  ],
+  "diagnostics.globals": [
+    "data",
+    "_",
+    "pGetText",
+    "pGetTextRes",
+    "getTextRes",
+    "_locale",
+    "_currentModIdTr",
+    "_getTextNow",
+    "game",
+    "api",
+    "ug",
+    "gui",
+    "debugPrint",
+    "toString",
+    "getCurrentModId",
+    "getBuildVersion",
+    "addModifier",
+    "applyModifiers",
+    "addFileFilter",
+    "clearFileFilter",
+    "applyFileFilters",
+    "setStrings",
+    "translateModStr"
+  ],
+  "diagnostics.disable": [
+    "lowercase-global"
+  ]
+}

@@ -1,0 +1,195 @@
+================================================================
+ RIGHT CLICK DETAILS - CHANGELOG
+================================================================
+
+
+================================================================
+ v1.4  (UNRELEASED - mod.lua still says minorVersion = 3)
+================================================================
+
+NEW
+
+* Toolbar button restyled to match the game's own bar buttons -
+  same disc, same size, same hover and pressed states.
+
+* Debug logging is back in the settings panel, as a ladybug in the
+  bottom corner. Dim when off, red when on. It was moved out to the
+  main-menu mod options in v1.3, which turned out to be unreachable
+  for a save already in progress.
+
+* Large figures are abbreviated. A commodity sitting on 62500 units
+  reads as 62.5K instead of stretching the panel.
+
+
+FIXED
+
+* Produced, Shipped and Used all read 0 on every industry. The game
+  keeps per-month and per-year counters but never fills them in, so
+  the mod was faithfully reporting an empty total.
+
+* Right-clicking the same spot again never cycled to the next thing
+  nearby. Opening a panel discarded the cycle it had just built, so
+  every right-click started over from the top. This had never worked
+  for any object type.
+
+* Stations and stops inside a town were unreachable - the town won
+  the first click, and cycling past it was the thing that did not
+  work.
+
+* Settings saved with your game were overwritten on load. The mod
+  applied the savegame first, then wrote the menu defaults back over
+  it, so a choice made in the panel survived only until the next
+  load.
+
+* Changing a setting in the main-menu mod options did nothing at all
+  on a save that had already been played. Mod options and in-game
+  choices are now told apart, so the one you changed is the one that
+  wins.
+
+
+CHANGED
+
+* Produced, Shipped and Used are lifetime totals since the industry
+  was built, and are labelled without "/yr". They were previously
+  described as trailing twelve-month figures, which the game's
+  counters do not actually provide.
+
+* The low-stock highlight is temporarily switched off. It compared
+  stock against a per-year consumption rate; with only lifetime
+  totals available that comparison would flag every row. It returns
+  when the mod can measure a real rate.
+
+
+================================================================
+ v1.3
+================================================================
+
+NEW
+
+* Settings now stick. Changing an option and reopening the panel
+  kept showing the old value - the mod was restoring saved data
+  over your choices while you played.
+
+* Town name setting: show it always, only when town labels are
+  hidden by the HUD filter, or never.
+
+* Escape closes the detail panel or the settings window. It only
+  does so while one is open, so Escape still opens the game menu
+  the rest of the time.
+
+* "Closes on: Mouse moves" works. It never fired before because
+  mouse listeners only receive button events, not movement.
+
+
+FIXED
+
+* Passengers on train and tram stations showed "--" instead of the
+  line they are waiting for. People are not cargo and needed a
+  different lookup.
+
+* Stored amounts on industries. Single-input industries such as
+  quarries and brick works now show their exact stock. Industries
+  with several inputs show a combined "Stored total" instead - the
+  game does not expose which stock slot holds which commodity, and
+  a combined figure is better than a confidently mislabelled one.
+
+* Right-clicking near an industry rather than on it picked the
+  wrong object, and the same industry could report different
+  numbers depending on where you clicked.
+
+* Bus stops, tram stops and depots were sometimes skipped in favour
+  of whatever was nearby.
+
+* Settings controls are buttons that cycle through their options.
+  Dropdowns were tried but did not reliably report changes.
+
+
+CHANGED
+
+* Debug logging moved out of the in-game panel. It is a support
+  switch rather than a preference, and still available in the mod
+  options from the main menu.
+
+* The mod no longer writes diagnostics to the game log unless debug
+  logging is switched on.
+
+
+================================================================
+ v1.2
+================================================================
+
+NEW
+
+* In-game settings panel. Open it with the mouse button on the right
+  of the HUD bar. Turn the panel on or off, choose how it closes,
+  pick a theme, and toggle debug logging. Settings are saved with
+  your game.
+
+* Three ways for the panel to close - click off, on mouse move, or
+  sticky (stays until you right-click it again).
+
+* Panel themes: Dark, Darker and Light.
+
+* Bus stops, tram stops and depots now have their own readouts.
+
+* Industry names are led by the commodity they produce, so quarries,
+  farms and oil wells say what they are at a glance.
+
+* Names are shown as titles. A town's name appears only when town
+  labels are switched off in the HUD filter, so it is never a
+  duplicate of the label right above it.
+
+* Bevelled panel corners.
+
+
+FIXED
+
+* The panel no longer disappears when you move the mouse.
+
+* Modded commodities now show up. Cargo types are read from the live
+  registry instead of a fixed list, so cargo-adding mods work.
+  Tested alongside Freestyle Industries.
+
+* Stored amounts named the wrong commodity - every stored row was
+  showing the next commodity along.
+
+* Industry readouts changed depending on exactly where you clicked.
+  An industry exists as two linked objects and only one carried the
+  production data; both now resolve to the same one.
+
+* You had to click near an industry rather than on it. The search
+  area was far too generous.
+
+* Industry stocks listed outputs alongside inputs, leaving half-empty
+  rows. Inputs only now, matching the game's own Stocks table.
+
+* Commodity icons stretched and squashed.
+
+* Middle-click no longer closes the panel, since it pans the camera.
+
+
+CHANGED
+
+* Rate figures now say what period they cover - Produced/yr,
+  Shipped/yr, Used/yr, Outbound/yr, Inbound/yr. These are trailing
+  twelve-month totals from the game's own counters. The industry
+  window shows a live rate over capacity, which is calculated
+  internally and is not available to mods, so the two will not match.
+  Stored is a live figure and does match.
+
+* Station throughput reads Outbound and Inbound rather than Loaded
+  and Unloaded, which was ambiguous in a small panel.
+
+* City labels are left at their default size. Earlier versions made
+  the commodity icons on them larger; that is now opt-in.
+
+* Diagnostics are off by default. Turn on Debug logging in the
+  settings if you are reporting a problem.
+
+
+================================================================
+ v1.1
+================================================================
+
+* First release. Right-click readouts for towns, industries and
+  stations.

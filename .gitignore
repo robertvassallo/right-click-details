@@ -1,0 +1,13 @@
+# Recovery leftovers and editor scratch
+*.DAMAGED.lua
+*.bak
+*.orig
+*~
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc
+
+# OS noise
+.DS_Store
+Thumbs.db

@@ -1733,7 +1733,8 @@ end
 
 --- Industry readout: level, production, shipment, transport rating.
 local function showIndustryPanel(entityId, entity, mouseX, mouseY)
-	destroyPanel(false)
+	-- keepCycle: this is a replacement, not a dismissal. See destroyPanel.
+	destroyPanel(false, nil, true)
 
 	local s = industrySummary(entityId, entity)
 
@@ -2113,7 +2114,8 @@ end
 -- so the next pass can show curated stats (waiting cargo, vehicle counts)
 -- instead of whatever happens to be there.
 local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
-	destroyPanel(false)
+	-- keepCycle: this is a replacement, not a dismissal. See destroyPanel.
+	destroyPanel(false, nil, true)
 
 	local concrete = (entity and entity.type) or kind
 	if not state.loggedKinds[concrete] then
@@ -2244,7 +2246,8 @@ end
 -- the click point -- which IS the label, since that is what was clicked -- and
 -- style the panel to match the label's plate so the two read as one unit.
 local function showPanel(townId, mouseX, mouseY)
-	destroyPanel(false)
+	-- keepCycle: this is a replacement, not a dismissal. See destroyPanel.
+	destroyPanel(false, nil, true)
 
 	local rows = cargoRows(townId)
 	local residents = townSummary(townId)

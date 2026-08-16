@@ -143,19 +143,28 @@ when town labels are hidden by the HUD filter.
 
 ## Before release
 
-- **Remove `probeStockMapping`.** It forces `settings.debug = true` for its own
-  duration and prints regardless of the player's setting.
-- **Re-gate the `PLACE:` toolbar logs.** They use `emit` so they always print;
-  demote to `log` now that placement works.
-- **Retest settings persistence.** `load()` merges param-backed settings against
-  a snapshot written at save time, so a param the player changed wins while an
-  untouched one defers to the in-game panel. Saves predating the snapshot keep
-  their stored values.
+Cleared for v1.4:
+
+- ~~Remove `probeStockMapping`~~ — gone. It forced `settings.debug = true` and
+  printed regardless of the player's setting.
+- ~~Re-gate the `PLACE:` toolbar logs~~ — now behind `log`, silent unless the
+  ladybug is on.
+- ~~`.luarc.json` ships to the Workshop~~ — the repo lives outside the staging
+  area now and `deploy.sh` excludes it, along with `tools/`, `PLAN.md`,
+  `README.md`, `LICENSE` and `.git/`.
+
+Still outstanding:
+
+- **Retest settings persistence** across a save/reload. `load()` merges
+  param-backed settings against a snapshot written at save time, so a param the
+  player changed wins while an untouched one defers to the in-game panel. Saves
+  predating the snapshot keep their stored values. Never verified end to end.
 - Internal identifiers still read `rlv_cityoverlay` — config module, component
   names, texture path, log prefix. Cosmetic; not player-visible.
-- `.luarc.json` ships to the Workshop; consider excluding.
 - Retake the industry screenshot, and add one of the toolbar button.
 - `!ui-couch` controller layout check for the new toolbar button.
+- Publish: staging already holds the exact shipping set, so it is `./deploy.sh`
+  then upload.
 
 ---
 

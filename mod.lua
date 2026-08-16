@@ -11,7 +11,7 @@ return {
 		-- (RightClickDetailsMod_1). No shipped mod declares it, and an
 		-- explicit value that disagrees with the folder is asking for
 		-- trouble.
-		minorVersion = 3,
+		minorVersion = 4,
 		name = _("mod_name"),
 		description = _("mod_desc"),
 		tags = { "Script Mod", "Misc" },

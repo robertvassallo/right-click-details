@@ -296,6 +296,57 @@ local function warn(...)
 	emit("WARN:", ...)
 end
 
+
+--- Mouse-move dismissal.
+--
+-- insertMouseListener delivers BUTTON events only -- a listener branch for
+-- motion never fired once, confirmed by instrumenting it. So this mode has to
+-- poll, which means guiUpdate.
+--
+-- guiUpdate runs every frame, so the cost is kept to essentially nothing: an
+-- early return unless a panel is open AND this mode is selected. No entity
+-- reads, no allocation -- just comparing the cursor against the point the
+-- panel opened at. That is a very different proposition from the live-refresh
+-- experiment removed earlier, which re-read simulation data continuously.
+-- Broadcast settings to the OTHER script instance.
+--
+-- The mod runs in more than one Lua context, each with its own `settings`
+-- table. The in-game panel and the ladybug run in the GUI context; save() runs
+-- in another. Proven from the log: the toggle prints "debug logging ENABLED"
+-- and the very next save(), microseconds later, still reports debug=false.
+-- Nothing was wrong with the load-side merge -- the value never reached the
+-- save at all.
+--
+-- res/scripts/guidesystem.lua has the same problem and solves it exactly this
+-- way: it sends its state as a script event from guiUpdate and reapplies it in
+-- handleEvent. Same pattern here, but only when something actually changed --
+-- guiUpdate runs every frame and this does not need to.
+local SETTINGS_EVENT = "rlvSettingsSync"
+
+local function settingsSignature()
+	return tostring(settings.panelEnabled) .. "|" .. tostring(settings.dismissMode)
+		.. "|" .. tostring(settings.townName) .. "|" .. tostring(settings.theme)
+		.. "|" .. tostring(settings.debug)
+end
+
+local function broadcastSettings()
+	local sig = settingsSignature()
+	if sig == state.lastBroadcastSig then return end
+	state.lastBroadcastSig = sig
+
+	local ok = pcall(function()
+		game.interface.sendScriptEvent(SETTINGS_EVENT, "", {
+			panelEnabled = settings.panelEnabled,
+			dismissMode  = settings.dismissMode,
+			townName     = settings.townName,
+			theme        = settings.theme,
+			debug        = settings.debug,
+		})
+	end)
+	if not ok then warn("settings broadcast failed") end
+end
+
+
 --- Log the structure AND values of an unknown return value, recursing a few
 -- levels. Scalars print their value -- an earlier version logged only the type
 -- for non-tables, which hid the actual number of getIndustryTransportRating.
@@ -2434,25 +2485,25 @@ local function buildOptionsPanel()
 	layout:addItem(buildOptionRow(_("Detail panel"),
 		{ _("On"), _("Off") }, { true, false },
 		function() return settings.panelEnabled end,
-		function(v) settings.panelEnabled = v end))
+		function(v) settings.panelEnabled = v; broadcastSettings() end))
 
 	layout:addItem(buildOptionRow(_("Closes on"),
 		{ DISMISS_TEXT.click, DISMISS_TEXT.move, DISMISS_TEXT.sticky },
 		DISMISS_MODES,
 		function() return settings.dismissMode end,
-		function(v) settings.dismissMode = v end))
+		function(v) settings.dismissMode = v; broadcastSettings() end))
 
 	layout:addItem(buildOptionRow(_("Town name"),
 		{ TOWN_NAME_TEXT.auto, TOWN_NAME_TEXT.always, TOWN_NAME_TEXT.never },
 		TOWN_NAME_MODES,
 		function() return settings.townName end,
-		function(v) settings.townName = v end))
+		function(v) settings.townName = v; broadcastSettings() end))
 
 	layout:addItem(buildOptionRow(_("Theme"),
 		{ THEME_TEXT.dark, THEME_TEXT.darker, THEME_TEXT.light },
 		THEMES,
 		function() return settings.theme end,
-		function(v) settings.theme = v end))
+		function(v) settings.theme = v; broadcastSettings() end))
 
 	layout:addItem(buildDivider())
 
@@ -2497,6 +2548,14 @@ local function buildOptionsPanel()
 		debugBtn:onClick(function()
 			settings.debug = not settings.debug
 			applyDebugStyle()
+			-- Push it to the context that owns save().
+			--
+			-- Broadcast from the mutation itself, not from guiUpdate: the log
+			-- showed guiUpdate runs somewhere this click never reaches, so it
+			-- sent a stale debug=false and its signature guard then suppressed
+			-- every send afterwards. Sending from the point of change guarantees
+			-- the sender is the context that actually changed.
+			broadcastSettings()
 			-- Always print, whatever the new state: this is the one line that
 			-- confirms the switch reached the script, and when turning logging
 			-- OFF it is the last thing that will appear.
@@ -2982,19 +3041,19 @@ local function guiHandleEvent(id, name, param)
 	-- (handled in the mouse listener) or right-clicking the same thing again.
 	-- If it still disappears on its own, destroyPanel logs the reason.
 end
-
---- Mouse-move dismissal.
---
--- insertMouseListener delivers BUTTON events only -- a listener branch for
--- motion never fired once, confirmed by instrumenting it. So this mode has to
--- poll, which means guiUpdate.
---
--- guiUpdate runs every frame, so the cost is kept to essentially nothing: an
--- early return unless a panel is open AND this mode is selected. No entity
--- reads, no allocation -- just comparing the cursor against the point the
--- panel opened at. That is a very different proposition from the live-refresh
--- experiment removed earlier, which re-read simulation data continuously.
 local function guiUpdate()
+	-- DELIBERATELY NOT broadcasting settings here.
+	--
+	-- It was, and that made things worse. guiUpdate does not run in the context
+	-- the options panel writes to: the log showed it sending debug=false while
+	-- the toggle had just set true elsewhere, and the signature guard then
+	-- suppressed every subsequent send. A frame hook in the wrong context also
+	-- risks overwriting a good value with a stale one.
+	--
+	-- Broadcasts now happen at each point of change instead -- the ladybug and
+	-- the four option setters -- so the sender is always the context that
+	-- actually changed something.
+
 	if not state.shownFor then return end
 	if settings.dismissMode ~= "move" then return end
 
@@ -3019,9 +3078,42 @@ function data()
 		guiInit = guiInit,
 		guiUpdate = guiUpdate,
 		guiHandleEvent = guiHandleEvent,
+
+		-- RECEIVE settings from the GUI context.
+		--
+		-- guiHandleEvent above is for GUI widget events; this is the separate
+		-- script-event channel, and it is the only way one script instance can
+		-- tell another that something changed. Without it the instance that runs
+		-- save() never sees a setting the player toggled, and every choice is
+		-- silently lost on reload -- which is the bug this fixes.
+		--
+		-- Guarded on the event id so we ignore everything else on the channel,
+		-- and the values are re-normalised rather than trusted verbatim.
+		handleEvent = function(src, id, name, param)
+			if id ~= SETTINGS_EVENT or type(param) ~= "table" then return end
+
+			if param.panelEnabled ~= nil then
+				settings.panelEnabled = param.panelEnabled and true or false
+			end
+			if param.dismissMode ~= nil then settings.dismissMode = tostring(param.dismissMode) end
+			if param.townName    ~= nil then settings.townName    = tostring(param.townName) end
+			if param.theme       ~= nil then settings.theme       = tostring(param.theme) end
+			if param.debug       ~= nil then settings.debug       = param.debug and true or false end
+
+			-- A setting arriving from elsewhere counts as the player having
+			-- spoken, so the param seed must not overwrite it later.
+			settingsLoaded = true
+
+			log("settings sync received: debug=", tostring(settings.debug),
+				"panel=", tostring(settings.panelEnabled),
+				"theme=", tostring(settings.theme))
+		end,
 		-- Persist the in-game settings. Additive only; if the mod is removed the
 		-- table is simply orphaned, so severityRemove stays NONE.
 		save = function()
+			-- NOTE: save() is called very frequently -- hundreds of times a
+			-- minute -- so nothing here may log unconditionally. A trace added
+			-- during debugging produced 900+ lines in a single session.
 			return {
 				panelEnabled = settings.panelEnabled,
 				dismissMode  = settings.dismissMode,
@@ -3035,6 +3127,7 @@ function data()
 				params = paramValues(),
 			}
 		end,
+
 		-- load() APPLIES ONCE.
 		--
 		-- TF2 calls a game script's load() to restore state, and it is not a
@@ -3104,6 +3197,12 @@ function data()
 			if pe ~= nil then settings.panelEnabled = pe and true or false end
 			if dm ~= nil then settings.dismissMode  = tostring(dm) end
 			if db ~= nil then settings.debug        = db and true or false end
+
+			log("settings restored: debug=", tostring(settings.debug),
+				"panel=", tostring(settings.panelEnabled),
+				"theme=", tostring(settings.theme),
+				"| snapshot=", tostring(snap ~= nil),
+				"params=", tostring(cur ~= nil))
 		end,
 	}
 end

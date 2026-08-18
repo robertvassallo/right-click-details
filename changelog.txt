@@ -4,6 +4,24 @@
 
 
 ================================================================
+ v1.5
+================================================================
+
+FIXED
+
+* Settings did not survive a reload. Changing an option or toggling
+  debug logging worked for the rest of the session, but the choice
+  was gone next time the save was loaded.
+
+  The mod runs in more than one script context, each holding its own
+  copy of the settings. The settings panel writes to one of them; the
+  code that stores settings in the savegame reads another. Choices
+  were being made in a copy nobody ever saved, so nothing reached the
+  save at all - the earlier attempts at this were all fixing the wrong
+  end. Changes are now sent between contexts as they happen.
+
+
+================================================================
  v1.4
 ================================================================
 

@@ -2026,6 +2026,10 @@ local function stationLines(stationId, entity)
 	-- Member station ids, since the group id may not be what these want.
 	local memberId = entity and entity.stations and entity.stations[1] or nil
 
+	-- Which variant produced the ids, so a bad id can be traced back to its
+	-- source rather than just reported as "not a LINE".
+	local usedVariant = nil
+
 	local attempts = {
 		{ "getLineStopsForStation(group)",  function() return ls.getLineStopsForStation(stationId) end },
 		{ "getLineStopsForStation(member)", function() return memberId and ls.getLineStopsForStation(memberId) end },
@@ -2042,6 +2046,7 @@ local function stationLines(stationId, entity)
 		end
 		if conv and #conv > 0 then
 			lineIds = conv
+			usedVariant = name
 			break
 		end
 	end
@@ -2075,7 +2080,26 @@ local function stationLines(stationId, entity)
 		if type(lineId) == "number" and not seen[lineId] then
 			seen[lineId] = true
 			local okL, le = pcall(game.interface.getEntity, lineId)
-			if okL and le and le.name then
+
+			-- VERIFY IT IS ACTUALLY A LINE.
+			--
+			-- The id above is inferred: a "line stop" may be the line id itself
+			-- or a table carrying one, and which of those comes back varies by
+			-- lookup variant and by station. When it is not a line, the colour
+			-- lookup fails and the row falls back to a grey disc -- which is why
+			-- the SAME line appeared coloured at one station and grey at
+			-- another. A per-line colour cache cannot cause that; a differing id
+			-- can.
+			--
+			-- getEntity reports .type, so reject anything that is not a LINE
+			-- rather than carrying a wrong id into the colour and name lookups.
+			local isLine = okL and le and le.type == "LINE"
+			if okL and le and le.name and not isLine then
+				log("stationLines: id", tostring(lineId), "is", tostring(le.type),
+					"not LINE (via", tostring(usedVariant or "?"), ") -- skipped")
+			end
+
+			if isLine and le.name then
 				out[#out + 1] = { id = lineId, name = le.name }
 			end
 		end
@@ -2183,27 +2207,80 @@ local function lineColor(lineId)
 		return c ~= false and c or nil
 	end
 
-	local out = nil
+	local out, why = nil, nil
 	local ct = api and api.type and api.type.ComponentType
-	if ct and ct.COLOR then
-		pcall(function()
+	if not (ct and ct.COLOR) then
+		why = "no ComponentType.COLOR"
+	else
+		local okAll = pcall(function()
 			local comp = api.engine.getComponent(lineId, ct.COLOR)
-			if not comp then return end
+			if not comp then why = "no COLOR component" return end
 			local c = comp.color
-			if not c then return end
-			-- The value is itself userdata; index it rather than iterate.
-			local r, g, b = c[0], c[1], c[2]
+			if not c then why = "component has no .color" return end
+
+			-- 1-BASED. An early version read c[0] first, got nil, and only
+			-- worked because of the .x fallback below.
+			local r, g, b = c[1], c[2], c[3]
 			if r == nil then r, g, b = c.x, c.y, c.z end
-			if type(r) == "number" and type(g) == "number" and type(b) == "number" then
-				out = { math.floor(r * 255 + 0.5),
-				        math.floor(g * 255 + 0.5),
-				        math.floor(b * 255 + 0.5) }
+			if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then
+				why = "vector unreadable (" .. type(r) .. ")"
+				return
 			end
+			out = { math.floor(r * 255 + 0.5),
+			        math.floor(g * 255 + 0.5),
+			        math.floor(b * 255 + 0.5) }
 		end)
+		if not okAll and not why then why = "lookup errored" end
+	end
+
+	-- Say WHY a line fell back to the neutral chip. Silent nils were being read
+	-- as "that line has no colour" when the cause could equally be a failed
+	-- lookup -- and the result is cached, so one transient failure would stick
+	-- for the rest of the session.
+	if not out then
+		state.loggedNoColor = state.loggedNoColor or {}
+		if not state.loggedNoColor[lineId] then
+			state.loggedNoColor[lineId] = true
+			log("line", tostring(lineId), "has no colour:", tostring(why))
+		end
 	end
 
 	lineColorCache[lineId] = out or false
 	return out
+end
+
+--- A line-colour disc.
+--
+-- Kept as one helper because three row builders need it -- passenger rows,
+-- per-line cargo rows and the fallback cargo rows -- and the colour-to-class
+-- arithmetic should live in exactly one place.
+--
+-- NO BORDER OR RING. Both were tried and reverted: borderWidth on a TextView
+-- draws a rectangle around the glyph's text box (it outlined the cell, not the
+-- circle), and stacking a larger disc behind it added weight without earning
+-- it. The plain disc is what the panel wants.
+--
+-- Colour cannot be applied at runtime -- setColor rejects every argument form
+-- and api.gui.util has no Color type -- so the stylesheet carries a 216-entry
+-- quantised grid (6 levels per channel, index r*36 + g*6 + b) and this snaps to
+-- the nearest.
+local function buildLineDot(color)
+	local dot = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF BLACK CIRCLE
+
+	if color then
+		local function level(v)
+			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
+		end
+		local idx = level(color[1]) * 36 + level(color[2]) * 6 + level(color[3])
+		dot:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
+	else
+		-- Neutral grey via its own class rather than a default on rlvLineDot:
+		-- the two have equal specificity, so a colour there would win on
+		-- declaration order and repaint every dot.
+		dot:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
+	end
+
+	return dot
 end
 
 --- Passengers per line at this station.
@@ -2274,47 +2351,8 @@ end
 local function buildLinePassengerRow(row)
 	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
 
-	-- The dot is a TextView rather than an image: line colours are arbitrary
-	-- RGB, so no fixed asset or style class can carry them -- it has to be set
-	-- per instance at runtime.
-	--
-	-- setColor EXISTS as a bound method, but its signature is undocumented:
-	-- nothing in the base game's scripts or any installed mod calls it, and
-	-- api.gui.util has no Color type (its dump lists only Alignment,
-	-- CameraController, MouseEvent, Orientation, Rect, SimTime, Size,
-	-- ViewManager and the get* helpers). So try the plausible shapes and take
-	-- whichever sticks, logging it once so the answer gets written down.
-	--
-	-- Failure is not fatal: an uncoloured dot still reads as a bullet and the
-	-- count and line name carry the meaning.
-	local dot = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF BLACK CIRCLE
-	dot:setStyleClassList({ "rlvLineDot" })
-
-	if row.color then
-		-- Snap to the nearest grid class. setColor was tried first and rejected
-		-- every argument form -- floats, 0-1 table, 0-255 table -- and there is
-		-- no Color type in api.gui.util, so setStyleClassList is the only route
-		-- and the colour must already exist as a class. The stylesheet defines
-		-- 216 of them, 6 levels per channel, indexed r*36 + g*6 + b.
-		local function level(v)
-			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
-		end
-		local idx = level(row.color[1]) * 36 + level(row.color[2]) * 6 + level(row.color[3])
-		dot:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
-
-		if not state.loggedDotColor then
-			state.loggedDotColor = true
-			log("line dot: rgb", row.color[1], row.color[2], row.color[3],
-				"-> class rlvDot" .. idx)
-		end
-	else
-		-- No colour available: grey, via its own class rather than a default on
-		-- rlvLineDot. A colour on rlvLineDot would win the cascade -- it is
-		-- declared after the rlvDot* rules -- and repaint every dot grey.
-		dot:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
-	end
-
-	layout:addItem(dot)
+	-- Line chip: coloured disc with a contrasting ring. See buildLineDot.
+	layout:addItem(buildLineDot(row.color))
 
 	-- ORDER: dot, count, line name.
 	--
@@ -2416,17 +2454,7 @@ end
 local function buildLineCargoRow(row)
 	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
 
-	local dot = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF
-	if row.color then
-		local function level(v)
-			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
-		end
-		local idx = level(row.color[1]) * 36 + level(row.color[2]) * 6 + level(row.color[3])
-		dot:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
-	else
-		dot:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
-	end
-	layout:addItem(dot)
+	layout:addItem(buildLineDot(row.color))
 
 	local amt = api.gui.comp.TextView.new(fmtCompact(row.count) or tostring(row.count))
 	amt:setStyleClassList({ "rlvLineCount" })
@@ -2472,18 +2500,7 @@ local function buildStationCargoRow(cargoId, amount, dest)
 	-- The arrow said "headed for", which the disc says just as well while also
 	-- identifying WHICH line at a glance -- and it matches the passenger rows,
 	-- so both halves of the panel use one visual language for "this line".
-	local col = dest and dest.id and lineColor(dest.id) or nil
-	local disc = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF
-	if col then
-		local function level(v)
-			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
-		end
-		local idx = level(col[1]) * 36 + level(col[2]) * 6 + level(col[3])
-		disc:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
-	else
-		disc:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
-	end
-	layout:addItem(disc)
+	layout:addItem(buildLineDot(dest and dest.id and lineColor(dest.id) or nil))
 
 	local nameText = api.gui.comp.TextView.new(
 		(dest and dest.name) and tostring(dest.name) or "--")

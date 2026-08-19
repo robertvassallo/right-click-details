@@ -19,9 +19,15 @@ Working and verified in-game:
 - In-game settings panel with a ladybug debug toggle
 - Large figures abbreviated (62500 → 62.5K), threshold 10000
 
-Untested since the last change: toolbar hover/pressed states, the ladybug's
-two-texture swap, debug persistence across save/load, and toolbar placement
-beside the bulldozer.
+Shipped since: v1.5 fixed settings persistence (the mod runs in more than one
+script context and the panel wrote to a different copy than save() read).
+v1.6 added the per-line station breakdown with line-colour discs.
+
+Open bug: a line can show its colour at one station and grey at another.
+Diagnosed as the line ID differing by station -- `stationLines` infers it from a
+"line stop" that is not always a line entity -- so it now verifies
+`type == "LINE"` and logs rejects with the lookup variant that produced them.
+Awaiting a log to confirm.
 
 ---
 
@@ -95,7 +101,62 @@ scope yet and it resolves to a nil global, crashing `guiInit`.
 
 ---
 
-## Open work
+## Roadmap — next up
+
+These are the planned direction, ahead of the older blocked items below.
+
+### A. Town details window — formatting pass
+
+The station panel was reworked in v1.6 into an exact highlighted total, a
+line-by-line breakdown with colour chips, and recessive throughput figures. The
+town panel has not had the same treatment and now looks like the odd one out.
+
+Bring it in line: icon-led totals, the same highlight and muted styles, and the
+same column discipline (fixed dot column, right-aligned counts) so numbers stack
+down the panel.
+
+### B. Town radius — lines and cargo within it
+
+Investigate what a town's catchment actually exposes, and whether the panel can
+answer "which lines serve this town" and "what cargo moves through it" rather
+than only what the town itself wants.
+
+Starting points, none verified:
+
+- `game.interface.getEntities({pos, radius}, {type=...})` already backs the
+  right-click search, so the same query shape can find stations near a town.
+- `stationSystem.getTown(stationEntity)` is documented — a station knows its
+  town, which may be cheaper and more accurate than a radius sweep.
+- `catchmentAreaSystem` exists in the system list and is unexplored; a real
+  catchment beats a guessed radius.
+- Per-station lines already work via `stationLines`, so town → stations → lines
+  is reachable once the first hop is settled.
+
+Watch the cost: this is a per-right-click query, and the industry panel already
+had a 120-entity walk removed for being too expensive.
+
+### C. Town name plate colour — toggle, if possible
+
+Investigate whether the city label plate's colour can be changed, and expose it
+as a toggle if so.
+
+Known constraints, from this mod's own history:
+
+- `TownItem` IS reachable from the stylesheet — the mod already restyles its
+  background image and tint.
+- BUT stylesheets evaluate in an isolated Lua state with no access to `game`,
+  so a runtime toggle cannot be read there. This is exactly why the mod's visual
+  sliders were removed in an earlier version.
+- So a toggle needs either a set of pre-declared style classes swapped from the
+  game script, or the same baked-asset approach the toolbar button uses.
+- `TownItem` is engine-rendered (HudIconManager), so no new subcontrols — only
+  properties on what already exists.
+
+Feasibility is genuinely unknown; establish that before designing the UI.
+
+---
+
+## Open work — older items
 
 ### 1. Per-cargo Stored on multi-input industries — BLOCKED
 

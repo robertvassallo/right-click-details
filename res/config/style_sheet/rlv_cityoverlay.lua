@@ -821,17 +821,19 @@ a("rlvDetailsOptions Button::Text", {
 		color = ssu.makeColor(24, 30, 38),
 	})
 
+	-- The line-colour disc. No border, no ring -- both were tried and reverted:
+	-- borderWidth outlines the glyph's text BOX rather than the circle (the
+	-- engine has no border-radius), and a stacked ring added weight without
+	-- earning it.
 	a("rlvCityOverlayPanel TextView!rlvLineDot", {
 		fontSize = 18,
 		gravity = { 0.0, 0.5 },
-		-- Fixed width so the dot occupies the same column on every row; without
-		-- it the glyph's own advance width varies with the theme font and the
-		-- counts beside it drift row to row.
+		-- Fixed width so the disc occupies the same column on every row;
+		-- otherwise the glyph's advance width varies with the theme font and
+		-- the counts beside it drift row to row.
 		minSize = { 16, -1 },
 		margin = { 0, 0, 3, 0 },
-	})
-
-	a("rlvCityOverlayPanel TextView!rlvDotNone", {
+	})	a("rlvCityOverlayPanel TextView!rlvDotNone", {
 		color = ssu.makeColor(150, 165, 180),
 	})
 

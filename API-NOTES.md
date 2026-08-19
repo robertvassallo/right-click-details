@@ -119,6 +119,45 @@ No runtime route to that array has been found: `ConstructionDesc.stocks`,
 `.placementParams`, `.updateFn` are all nil, and `STOCK_LIST` is opaque. Do not
 parse the shipped `.con` files -- cargo mods override them.
 
+### Per-station attribution: cargo YES, passengers NO
+
+`getSimCargosForLine(lineId)` returns items carrying **`sourceEntity`** -- the
+entity the item is waiting at. Filtering a line's freight by station is therefore
+a field test on data already in hand, no per-entity lookups.
+
+`SIM_PERSON` has no equivalent. Probed and ruled out, all against a live save:
+
+    station entity              cargoWaiting totals only; no per-line split, no
+                                person ids to intersect
+    SIM_PERSON.sourceEntity     does not exist
+    SIM_PERSON.targetOrAtEntity 21 distinct values, every one a CONSTRUCTION --
+                                the person's destination BUILDING
+    SIM_PERSON.destinations[1]  26 distinct, all CONSTRUCTION, none the station
+    simPersonAtTerminalSystem   only getEdgeInfoMap/getNumFreePlaces/getPos01
+    getSimPersonsAtTerminalForTransportNetwork(tnEntity)
+                                documented as "persons waiting at the given
+                                transport network" -- but nothing yields a
+                                tnEntity: not the station group, its members,
+                                their constructions, nor
+                                getEntities{type="TRANSPORT_NETWORK"}
+    STATION component           returns nil on the group AND its members, so its
+                                documented terminals/personNodes are unreachable
+    subtraction (onLine - riders)
+                                getLineVehicles yields nothing usable from
+                                lineSystem or game.interface
+
+So passenger figures can only be route-wide. Two measurement mistakes wasted a
+lot of time here and are worth avoiding: passing a station id where a network
+entity was wanted, and calling `#t` on a return documented as a key-value map.
+
+### Opening an entity's window
+
+    comp.GameUI:getViewManager()
+    util.ViewManager:openWindow(entity, above, tabIndex) -> [Window] or nil
+
+That is the route to making something clickable-to-open (e.g. a line row opening
+the line overview). `game.gui.openWindow` also exists in the legacy table.
+
 ### Time
 
     game.interface.getGameTime().time   elapsed GAME-TIME SECONDS, monotonic

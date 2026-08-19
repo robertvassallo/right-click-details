@@ -28,6 +28,7 @@ local PANEL_NAME = "rlvCityOverlayPanel"   -- no "." or "_"
 local ROW_NAME    = "rlvCityOverlayRow"
 local HEADER_NAME  = "rlvCityOverlayHeader"
 local DIVIDER_NAME = "rlvCityOverlayDivider"
+local SPACER_NAME  = "rlvCityOverlaySpacer"
 -- Set false to abandon our own overlay root and go back to parenting into the
 -- engine's toolTipContainer. That reintroduces the mouse-move vanish, but is a
 -- known-good state if the root ever misbehaves.
@@ -1749,15 +1750,47 @@ local function industryOutputs(entity)
 	return ids
 end
 
-local function buildStatRow(label, value)
+-- valueClass is optional: it replaces rlvStatValue on the figure only, so a
+-- single row can be highlighted without a second row builder.
+local function buildStatRow(label, value, valueClass, labelClass)
 	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+
+	local cap = api.gui.comp.TextView.new(label)
+	cap:setStyleClassList({ labelClass or "rlvStatLabel" })
+	layout:addItem(cap)
+
+	local val = api.gui.comp.TextView.new(value)
+	val:setStyleClassList({ valueClass or "rlvStatValue" })
+	layout:addItem(val)
+
+	local comp = api.gui.comp.Component.new(ROW_NAME)
+	comp:setLayout(layout)
+	return comp
+end
+
+--- A stat row led by a cargo icon: icon, label, value.
+--
+-- Used for "Waiting here", so the exact per-stop figure carries the passengers
+-- icon and reads as a commodity total rather than another line row. Falls back
+-- to a plain row if the texture will not load.
+local function buildIconStatRow(iconPath, label, value, valueClass)
+	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+
+	local okIcon = pcall(function()
+		local iv = api.gui.comp.ImageView.new(iconPath)
+		iv:setStyleClassList({ "rlvRowIcon" })
+		layout:addItem(iv)
+	end)
+	if not okIcon then
+		return buildStatRow(label, value, valueClass)
+	end
 
 	local cap = api.gui.comp.TextView.new(label)
 	cap:setStyleClassList({ "rlvStatLabel" })
 	layout:addItem(cap)
 
 	local val = api.gui.comp.TextView.new(value)
-	val:setStyleClassList({ "rlvStatValue" })
+	val:setStyleClassList({ valueClass or "rlvStatValue" })
 	layout:addItem(val)
 
 	local comp = api.gui.comp.Component.new(ROW_NAME)
@@ -2087,7 +2120,7 @@ local function cargoLineMap(lines)
 					"raw=", type(people), "converted=", conv and ("n=" .. #conv) or "nil")
 			end
 			if conv and #conv > 0 and not map.PASSENGERS then
-				map.PASSENGERS = line.name
+				map.PASSENGERS = { name = line.name, id = line.id }
 			end
 		end
 	end
@@ -2118,7 +2151,7 @@ local function cargoLineMap(lines)
 					-- First line wins; a cargo type is normally served by one
 					-- line at a given station.
 					if ctype and not map[ctype] then
-						map[ctype] = line.name
+						map[ctype] = { name = line.name, id = line.id }
 					end
 				end
 			end
@@ -2129,289 +2162,19 @@ local function cargoLineMap(lines)
 	return map
 end
 
---- ONE-SHOT PROBE for the per-line passenger display.
---
--- Three unknowns, none of which should be guessed at -- STOCK_LIST looked
--- reachable too and turned out to be completely opaque to Lua.
---
---  1. LINE COLOUR. The LINE component does NOT carry it: its sol usertype
---     exposes exactly three fields (stops, and two 11-char ones -- a float and
---     a LineVehicleInfo, i.e. waitingTime and vehicleInfo). But a COLOR
---     component type exists alongside LINE and LINE_NAME, and the palette is
---     readable at game.config.gui.lineColors (base_config.lua:326, ~30 RGB
---     triples as 0-1 floats). So: does getComponent(lineId, COLOR) return
---     anything, and does it index that palette?
---
---  2. PER-STATION PASSENGER COUNTS. getSimPersonsForLine is LINE-WIDE -- it
---     answers "who is on this line", not "who is waiting here". The display
---     needs the latter, so simPersonAtTerminalSystem is the candidate.
---
---  3. THE SHAPE of whatever those calls return -- counts, entity lists, or
---     containers needing toTable.
---
--- Gated on debug logging, which now actually persists. Fires once per session
--- on the first station right-click.
-local function probeLinePassengers(stationId, lines)
-	if state.loggedLineProbe then return end
-	if not settings.debug then return end
-	state.loggedLineProbe = true
-
-	log("=== PER-LINE PASSENGER PROBE ===")
-	log("station=", tostring(stationId), "lines=", tostring(#lines))
-
-	-- 1. the palette
-	local pal = game and game.config and game.config.gui and game.config.gui.lineColors
-	log("game.config.gui.lineColors ->", type(pal),
-		type(pal) == "table" and ("n=" .. #pal) or "")
-	if type(pal) == "table" and pal[1] then
-		log("  palette[1] =", tostring(pal[1][1]), tostring(pal[1][2]), tostring(pal[1][3]))
-	end
-
-	-- 2. the COLOR component, per line
-	local ct = api and api.type and api.type.ComponentType
-	log("ComponentType.COLOR exists ->", tostring(ct and ct.COLOR ~= nil))
-	for i = 1, math.min(#lines, 3) do
-		local line = lines[i]
-		if ct and ct.COLOR then
-			local okC, comp = pcall(api.engine.getComponent, line.id, ct.COLOR)
-			log("  line", tostring(line.id), tostring(line.name),
-				"COLOR ok=", tostring(okC), "type=", type(comp))
-			if okC and comp ~= nil then
-				dumpKeys("    COLOR", comp)
-				local conv = toTable(comp)
-				log("    toTable ->", conv and "table" or "nil")
-				if conv then describeShape("    COLOR", conv, 3) end
-				-- __index may be a function even when iteration fails, as it
-				-- was on ConstructionDesc.
-				for _, f in ipairs({ "color", "colour", "index", "value", "rgb" }) do
-					local okF, v = pcall(function() return comp[f] end)
-					if okF and v ~= nil then
-						log("    COLOR." .. f, "=", type(v), tostring(v))
-					end
-				end
-			end
-		end
-	end
-
-	-- 3. per-station passengers
-	local sys = api and api.engine and api.engine.system
-	local spat = sys and sys.simPersonAtTerminalSystem
-	log("simPersonAtTerminalSystem ->", type(spat))
-	if spat then
-		dumpKeys("  simPersonAtTerminalSystem", spat)
-	end
-
-	-- and what the line-wide call actually hands back, for comparison
-	local sps = sys and sys.simPersonSystem
-	if sps and sps.getSimPersonsForLine and lines[1] then
-		local ok, people = pcall(function() return sps.getSimPersonsForLine(lines[1].id) end)
-		local conv = ok and toTable(people) or nil
-		log("getSimPersonsForLine(", tostring(lines[1].id), ") ok=", tostring(ok),
-			"raw=", type(people), "n=", conv and #conv or "nil")
-		if conv and conv[1] then
-			log("  first entry type=", type(conv[1]), "value=", tostring(conv[1]))
-		end
-	end
-
-	-- 4. WHAT DOES THE STATION ITSELF ALREADY HOLD?
-	--
-	-- The panel already shows a correct per-station passenger total from
-	-- entity.cargoWaiting, so the station clearly knows. The question is whether
-	-- that is only a total, or whether anything here is broken down per line --
-	-- or exposes the waiting PEOPLE as entity ids, which could be intersected
-	-- with getSimPersonsForLine to get "waiting here, for this line" without
-	-- inspecting every person.
-	local okS, se = pcall(game.interface.getEntity, stationId)
-	log("station entity ok=", tostring(okS), "type=", type(se))
-	if okS and type(se) == "table" then
-		dumpKeys("  station", se)
-		for _, f in ipairs({ "cargoWaiting", "cargoWaitingPeople", "people",
-		                     "persons", "simPersons", "waiting", "terminals",
-		                     "stations", "lines" }) do
-			local v = se[f]
-			if v ~= nil then
-				local conv = toTable(v)
-				log("  station." .. f, "type=", type(v),
-					conv and ("entries=" .. tostring(#conv)) or "")
-				if conv then describeShape("    station." .. f, conv, 3) end
-			end
-		end
-	end
-
-	-- simCargoAtTerminalSystem is the freight mirror of simPersonAtTerminal --
-	-- if it has a per-terminal breakdown, a person equivalent may exist too.
-	local scat = sys and sys.simCargoAtTerminalSystem
-	log("simCargoAtTerminalSystem ->", type(scat))
-	if scat then dumpKeys("  simCargoAtTerminalSystem", scat) end
-
-	-- 5. WHY THE PER-STATION COUNT IS ZERO.
-	--
-	-- Filtering a line's people by p.sourceEntity resolved (getEntity returned a
-	-- table) but matched nothing, so a person does NOT carry the field cargo
-	-- does. Dump one and see what it actually has.
-	--
-	-- Also: simPersonSystem has calls that were not obvious from its name --
-	-- getSimPersonsAtTerminalForTransportNetwork, ForDestination, ForTarget,
-	-- Idle/MovingForTransportNetwork. The AtTerminal one is very likely the
-	-- "waiting here" set that would intersect with the per-line list, but its
-	-- signature is unknown, so try the plausible argument shapes.
-	if sps and lines[1] then
-		local okL, people = pcall(function() return sps.getSimPersonsForLine(lines[1].id) end)
-		local ids = okL and toTable(people) or nil
-		if ids and ids[1] then
-			local okP, p = pcall(game.interface.getEntity, ids[1])
-			log("person entity ok=", tostring(okP), "type=", type(p))
-			if okP and type(p) == "table" then
-				dumpKeys("  person", p)
-				describeShape("  person", p, 2)
-			end
-		end
-
-		for _, fname in ipairs({ "getSimPersonsAtTerminalForTransportNetwork",
-		                         "getSimPersonsForDestination",
-		                         "getSimPersonsForTarget" }) do
-			local fn = sps[fname]
-			log("simPersonSystem." .. fname, "->", type(fn))
-			if fn then
-				-- Try (stationId) and (stationId, 0) -- terminal index is the
-				-- likely second argument.
-				for _, args in ipairs({ { stationId }, { stationId, 0 } }) do
-					local okC, res = pcall(function() return fn(table.unpack(args)) end)
-					local conv = okC and toTable(res) or nil
-					log("   ", fname, "(" .. #args .. " args) ok=", tostring(okC),
-						"type=", type(res), "n=", conv and #conv or "nil",
-						(not okC) and tostring(res):sub(1, 90) or "")
-					if conv and #conv > 0 then break end
-				end
-			end
-		end
-	end
-
-	-- 6. HOW DO WE READ THE COLOUR VECTOR, and can we get per-terminal people?
-	--
-	-- COLOR.color prints as "(1 / 0 / 1)" so it is a vec3-ish userdata, but
-	-- neither c[0..2] nor c.x/y/z reached it -- lineColor() returned nil and
-	-- every dot fell back to grey. Try every plausible accessor and say which
-	-- one works.
-	if ct and ct.COLOR and lines[1] then
-		local okC, comp = pcall(api.engine.getComponent, lines[1].id, ct.COLOR)
-		if okC and comp then
-			local okV, v = pcall(function() return comp.color end)
-			log("colour vector type=", type(v), "tostring=", tostring(v))
-			if okV and v ~= nil then
-				dumpKeys("  color", v)
-				for _, acc in ipairs({ "x", "y", "z", "w", "r", "g", "b", "a" }) do
-					local ok2, got = pcall(function() return v[acc] end)
-					if ok2 and got ~= nil then log("  color." .. acc, "=", tostring(got)) end
-				end
-				for i = 0, 3 do
-					local ok2, got = pcall(function() return v[i] end)
-					if ok2 and got ~= nil then log("  color[" .. i .. "]", "=", tostring(got)) end
-				end
-				local conv = toTable(v)
-				log("  toTable(color) ->", conv and ("n=" .. #conv) or "nil")
-				if conv then describeShape("  color", conv, 2) end
-			end
-		end
-	end
-
-	-- THE TERMINAL ROUTE, from the documented component layout.
-	--
-	-- API reference (api.type, ComponentType):
-	--   STATION = 59            has `terminals`
-	--   each Terminal has       personNodes, personEdges  <- the waiting areas
-	--   TRANSPORT_NETWORK = 52  attaches to STREET AND RAIL INFRASTRUCTURE,
-	--                           not to stations -- which is exactly why reading
-	--                           it off the station returned nil earlier
-	--   COLOR = 64              an RGB vector
-	--
-	-- And getSimPersonsAtTerminalForTransportNetwork(tnEntity) returns
-	-- {[Entity]={Entity,...},...} -- a MAP keyed by entity. Almost certainly
-	-- keyed by those person nodes. So: collect this station's personNodes, then
-	-- look for them among the map's keys.
-	local nodeSet, nodeCount = {}, 0
-	if ct and ct.STATION then
-		local ids = { stationId }
-		local mem2 = entity and toTable(entity.stations)
-		if mem2 then for _, m in pairs(mem2) do ids[#ids + 1] = m end end
-
-		for _, sid in ipairs(ids) do
-			local okSt, st = pcall(api.engine.getComponent, sid, ct.STATION)
-			log("STATION component on", tostring(sid), "ok=", tostring(okSt),
-				"type=", type(st))
-			if okSt and st then
-				local terms = toTable(st.terminals)
-				log("  terminals=", terms and #terms or "nil")
-				if terms then
-					for ti = 1, #terms do
-						local t = toTable(terms[ti]) or terms[ti]
-						local pn = t and toTable(t.personNodes)
-						local pe = t and toTable(t.personEdges)
-						log("   terminal", ti, "personNodes=", pn and #pn or "?",
-							"personEdges=", pe and #pe or "?")
-						if pn then
-							for _, nid in pairs(pn) do
-								if type(nid) == "number" then
-									nodeSet[nid] = true; nodeCount = nodeCount + 1
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-	log("collected personNodes:", nodeCount)
-
-	-- Now the map. Try nearby transport networks; check every key against both
-	-- the station ids and the person nodes.
-	local fn = sps and sps.getSimPersonsAtTerminalForTransportNetwork
-	if fn then
-		local cands = {}
-		local okE, ents = pcall(function()
-			return game.interface.getEntities(
-				{ pos = { entity.position[1] or entity.position.x or 0,
-				          entity.position[2] or entity.position.y or 0 },
-				  radius = 400 },
-				{ type = "TRANSPORT_NETWORK" })
-		end)
-		if okE and type(ents) == "table" then
-			for i2 = 1, math.min(#ents, 6) do cands[#cands + 1] = ents[i2] end
-		end
-		log("  TRANSPORT_NETWORK entities near station:", #cands)
-
-		for _, cid in ipairs(cands) do
-			local okR, res = pcall(function() return fn(cid) end)
-			local m = okR and toTable(res) or nil
-			local keys, matched, people = 0, 0, 0
-			if m then
-				for k2, v2 in pairs(m) do
-					keys = keys + 1
-					if here[k2] or nodeSet[k2] then
-						matched = matched + 1
-						local lv = toTable(v2)
-						people = people + (lv and #lv or 0)
-					end
-				end
-			end
-			log("  fn(", tostring(cid), ") ok=", tostring(okR), "keys=", keys,
-				"matchedKeys=", matched, "peopleHere=", people)
-		end
-	end
-
-	log("=== END PER-LINE PASSENGER PROBE ===")
-end
-
 --- A line's colour as { r, g, b } in 0-255, or nil.
 --
 -- The LINE component does NOT carry colour -- its Lua usertype exposes only
--- stops, waitingTime and vehicleInfo. Colour is a separate COLOR component, and
--- its `color` field hands back the RGB directly as 0-1 floats. Confirmed at
--- runtime on two lines: (1/0/1) and (0.968/0.505/0.505).
+-- stops, waitingTime and vehicleInfo. Colour is the separate COLOR component
+-- (api.type: COLOR = 64, "an RGB vector"), and its `color` field hands back the
+-- values as 0-1 floats. Confirmed at runtime on two lines: (1/0/1) and
+-- (0.968/0.505/0.505).
 --
--- Note the userdata does NOT iterate -- toTable returns nil -- but `.color`
--- resolves fine, because __index is a function. Same shape as ConstructionDesc.
--- game.config.gui.lineColors is a red herring: no palette indexing is needed.
+-- The vector does NOT iterate -- toTable returns nil -- but both .x/.y/.z and
+-- [1]/[2]/[3] resolve, because __index is a function. Note it is 1-BASED: an
+-- earlier attempt read [0] first, got nil, and fell through.
+--
+-- Cached per line: the answer never changes and this runs on every right-click.
 local lineColorCache = {}
 
 local function lineColor(lineId)
@@ -2443,158 +2206,60 @@ local function lineColor(lineId)
 	return out
 end
 
---- Passengers waiting AT THIS STATION, per line.
+--- Passengers per line at this station.
 --
--- Returns a list of { name, count, color, lineWide } sorted busiest first.
+-- Returns { name, count, color } sorted busiest first, where `count` is the
+-- line's total passengers -- everyone travelling with it, route-wide.
 --
--- getSimPersonsForLine is LINE-WIDE -- it answers "who is on this line
--- anywhere", not "who is waiting here". The station itself cannot help: its
--- entity carries only cargoWaiting as a flat commodity->amount map, with no
--- per-line split and no list of waiting person ids to intersect against.
+-- PER-STOP ATTRIBUTION IS NOT AVAILABLE, and this is settled rather than
+-- unfinished. Everything below was probed against a live save:
 --
--- The way through came from the freight side. getSimCargosForLine returns items
--- carrying `sourceEntity` -- where the item is waiting -- so filtering a line's
--- items by station is just a field test, no per-entity lookups. Passengers come
--- back as bare ids rather than tables, so each needs one resolve step to reach
--- the same field.
+--   station entity            cargoWaiting totals only; no per-line split and
+--                             no person ids to intersect
+--   SIM_PERSON.sourceEntity   does not exist (that is a cargo field)
+--   SIM_PERSON.targetOrAtEntity  21 distinct values, every one a CONSTRUCTION
+--                             -- the person's destination BUILDING
+--   SIM_PERSON.destinations[1]   26 distinct, all CONSTRUCTION, none matching
+--                             the station
+--   simPersonAtTerminalSystem  only getEdgeInfoMap/getNumFreePlaces/getPos01
+--   getSimPersonsAtTerminalForTransportNetwork  needs a tnEntity; stations,
+--                             their members, their constructions and
+--                             getEntities{TRANSPORT_NETWORK} all fail to yield
+--                             one
+--   STATION component         returns nil on the group and its members, so its
+--                             documented `terminals`/`personNodes` are
+--                             unreachable
+--   subtraction (onLine minus riders)  getLineVehicles yields nothing usable
+--                             from either lineSystem or game.interface
 --
--- If that resolve does not work, the count falls back to the line-wide total and
--- `lineWide` is set, so the caller can label it honestly rather than implying a
--- per-station figure it does not have.
+-- The panel therefore shows an EXACT per-stop total in its own highlighted row
+-- (straight from cargoWaiting) above these route-wide line figures. Two honest
+-- numbers rather than one invented one.
+--
+-- An earlier version walked every person on the line calling getEntity to
+-- filter by station -- up to 120 lookups per right-click, always returning
+-- zero. Removed: it cost real time per click and produced nothing.
 local function linePassengers(stationId, entity, lines)
 	local out = {}
 	local sys = api and api.engine and api.engine.system
 	local sps = sys and sys.simPersonSystem
 	if not (sps and sps.getSimPersonsForLine) then return out end
 
-	-- A station group's own id and its member ids both count as "here".
-	local here = { [stationId] = true }
-	local members = entity and toTable(entity.stations)
-	if members then
-		for _, m in pairs(members) do
-			if type(m) == "number" then here[m] = true end
-		end
-	end
-
 	for i = 1, #lines do
 		local line = lines[i]
 		local ok, people = pcall(function() return sps.getSimPersonsForLine(line.id) end)
 		local ids = ok and toTable(people) or nil
+		local total = ids and #ids or 0
 
-		if ids then
-			local total = #ids
-			local atStation, resolved = 0, false
-
-			-- Cap the walk. A busy line can hold hundreds of people and this
-			-- runs on every right-click; the cargo path already caps at the
-			-- same limit for the same reason.
-			local n = math.min(total, MAX_CARGO_SAMPLES)
-			for k = 1, n do
-				local pid = ids[k]
-				local okP, p = pcall(game.interface.getEntity, pid)
-				if okP and type(p) == "table" then
-					resolved = true
-					-- targetOrAtEntity, NOT sourceEntity.
-					--
-					-- Cargo items carry sourceEntity -- where the item waits --
-					-- and filtering people by it looked like the obvious mirror.
-					-- It is not: a SIM_PERSON has no such field, so every test
-					-- silently failed and every line reported zero. A person
-					-- dump settled it:
-					--   { cargoType = PASSENGERS, targetOrAtEntity = 26328,
-					--     destinations = { 57083, 26767, 26328 }, ... }
-					-- targetOrAtEntity is the entity they are AT, or heading to.
-					if here[p.targetOrAtEntity] then atStation = atStation + 1 end
-				end
-			end
-
-			-- Scale a sampled count back up, so a capped walk still reports a
-			-- representative figure rather than a truncated one.
-			if resolved and n < total and n > 0 then
-				atStation = math.floor(atStation * (total / n) + 0.5)
-			end
-
-			if not state.loggedLinePax then
-				state.loggedLinePax = true
-				-- Include the ids on BOTH sides of the comparison. When this
-				-- returned zero for every line, the log said only "atStation=0",
-				-- which does not distinguish "nobody is here" from "the field is
-				-- wrong" -- and it was the field. Printing both makes the next
-				-- mismatch self-evident.
-				local hereList = {}
-				for k2 in pairs(here) do hereList[#hereList + 1] = tostring(k2) end
-
-				-- HISTOGRAM, not a sample.
-				--
-				-- Comparing targetOrAtEntity against the station ids assumed the
-				-- two are the same kind of entity. They may not be: a person
-				-- waiting at a stop may reference a TERMINAL or line-stop entity
-				-- rather than the station itself. Printing six arbitrary values
-				-- could not show that; counting them can. If people waiting here
-				-- share a location, it appears as a large bucket, and resolving
-				-- that id says what kind of thing the game actually uses.
-				local hist = {}
-				for k2 = 1, n do
-					local okS, sp = pcall(game.interface.getEntity, ids[k2])
-					if okS and type(sp) == "table" then
-						local t = sp.targetOrAtEntity
-						if t then hist[t] = (hist[t] or 0) + 1 end
-					end
-				end
-				local ranked = {}
-				for eid, c in pairs(hist) do ranked[#ranked + 1] = { id = eid, c = c } end
-				table.sort(ranked, function(a2, b2) return a2.c > b2.c end)
-
-				log("linePassengers:", tostring(line.name),
-					"total=", total, "sampled=", n,
-					"resolved=", tostring(resolved), "atStation=", atStation,
-					"| station ids:", table.concat(hereList, ","),
-					"| distinct targets:", #ranked)
-				for k2 = 1, math.min(5, #ranked) do
-					local okE, e2 = pcall(game.interface.getEntity, ranked[k2].id)
-					log("   target", tostring(ranked[k2].id), "x", ranked[k2].c,
-						"->", okE and type(e2) == "table"
-							and (tostring(e2.type) .. " " .. tostring(e2.name)) or "?")
-				end
-			end
-
-			-- ONLY LINES WITH PEOPLE ACTUALLY WAITING.
-			--
-			-- A freight station is served by freight lines, every one of which
-			-- reports zero passengers -- listing them all with a 0 beside a
-			-- coloured dot is noise, and it made a cargo yard look like a
-			-- passenger interchange. The row exists to answer "who is waiting
-			-- for what", so a line nobody is waiting for has nothing to say.
-			--
-			-- This also means a purely freight station shows no per-line rows at
-			-- all and falls through to the normal commodity list.
-			-- DEGRADE HONESTLY.
-			--
-			-- Per-station attribution is not solved: a person carries
-			-- targetOrAtEntity (where they are HEADED -- unique per person and
-			-- never the stop they wait at) and no field that names their current
-			-- stop. So a resolve that finds nobody here is far more likely to
-			-- mean "we cannot tell" than "this line has no passengers", and
-			-- dropping the row would hide a line with 102 people on it.
-			--
-			-- Fall back to the line-wide total and mark it, so the panel says
-			-- something true rather than nothing or something wrong.
-			local count, wide = atStation, not resolved
-			if count == 0 and total > 0 then
-				count, wide = total, true
-			end
-
-			if count > 0 then
-				out[#out + 1] = {
-					name     = line.name,
-					count    = count,
-					-- nil until per-stop attribution works; the row then shows
-					-- the line total alone rather than a bogus fraction.
-					atStop   = (not wide) and atStation or nil,
-					color    = lineColor(line.id),
-					lineWide = wide,
-				}
-			end
+		-- Only lines someone is actually travelling with. A freight station is
+		-- served by freight lines, every one reporting zero -- listing them all
+		-- made a cargo yard look like a passenger interchange.
+		if total > 0 then
+			out[#out + 1] = {
+				name  = line.name,
+				count = total,
+				color = lineColor(line.id),
+			}
 		end
 	end
 
@@ -2632,8 +2297,7 @@ local function buildLinePassengerRow(row)
 		-- and the colour must already exist as a class. The stylesheet defines
 		-- 216 of them, 6 levels per channel, indexed r*36 + g*6 + b.
 		local function level(v)
-			local i = math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
-			return i
+			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
 		end
 		local idx = level(row.color[1]) * 36 + level(row.color[2]) * 6 + level(row.color[3])
 		dot:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
@@ -2643,32 +2307,143 @@ local function buildLinePassengerRow(row)
 			log("line dot: rgb", row.color[1], row.color[2], row.color[3],
 				"-> class rlvDot" .. idx)
 		end
+	else
+		-- No colour available: grey, via its own class rather than a default on
+		-- rlvLineDot. A colour on rlvLineDot would win the cascade -- it is
+		-- declared after the rlvDot* rules -- and repaint every dot grey.
+		dot:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
 	end
 
 	layout:addItem(dot)
 
-	-- ORDER: dot, line name, then "here / whole line".
+	-- ORDER: dot, count, line name.
 	--
-	-- The name leads because it is what identifies the row; the numbers trail so
-	-- they line up down the column and can be compared at a glance. The pair
-	-- reads as a fraction on purpose -- 32 of this line's 68 passengers are
-	-- standing at this stop.
+	-- The dot and its number read as one unit -- "this line, this many" -- with
+	-- the name trailing as the label. rlvLineCount rather than rlvStatValue
+	-- because that class right-aligns for the label/value rows, which would
+	-- shove the number away from its dot.
+	--
+	-- If per-stop attribution ever becomes available, this is the one place to
+	-- change: build atStop .. " / " .. count instead. See linePassengers for the
+	-- routes ruled out.
+	local amt = api.gui.comp.TextView.new(fmtCompact(row.count) or tostring(row.count))
+	amt:setStyleClassList({ "rlvLineCount" })
+	layout:addItem(amt)
+
 	local name = api.gui.comp.TextView.new(tostring(row.name or "?"))
 	name:setStyleClassList({ "rlvDest" })
 	layout:addItem(name)
 
-	-- Falls back to just the line total while per-stop attribution is
-	-- unresolved, rather than printing a fraction with a fake numerator.
-	local text
-	if row.atStop then
-		text = (fmtCompact(row.atStop) or tostring(row.atStop))
-			.. " / " .. (fmtCompact(row.count) or tostring(row.count))
-	else
-		text = fmtCompact(row.count) or tostring(row.count)
+	local comp = api.gui.comp.Component.new(ROW_NAME)
+	comp:setLayout(layout)
+	return comp
+end
+
+--- A blank vertical gap. Height comes from the stylesheet.
+--
+-- Used to separate the exact per-stop figure from the whole-line rows beneath
+-- it, so the two groups do not read as one list of comparable numbers.
+local function buildSpacer()
+	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+	local comp = api.gui.comp.Component.new(SPACER_NAME)
+	comp:setLayout(layout)
+	return comp
+end
+
+--- Waiting freight at THIS station, broken down per line and cargo type.
+--
+-- Returns { line, color, cargoId, count } sorted busiest first.
+--
+-- Unlike passengers, this IS attributable to a stop. getSimCargosForLine hands
+-- back items carrying `sourceEntity` -- where the item is waiting -- so
+-- filtering by station is a field test on data already in hand, with no
+-- per-entity lookups. That field is exactly what a SIM_PERSON lacks, which is
+-- why the passenger rows can only be route-wide.
+--
+-- Sampling is capped like the rest of the cargo paths: a busy yard held 429
+-- items on a single line.
+local function lineCargo(stationId, entity, lines)
+	local out = {}
+	local sys = api and api.engine and api.engine.system
+	local scs = sys and sys.simCargoSystem
+	if not (scs and scs.getSimCargosForLine) then return out end
+
+	local here = { [stationId] = true }
+	local members = entity and toTable(entity.stations)
+	if members then
+		for _, m in pairs(members) do
+			if type(m) == "number" then here[m] = true end
+		end
 	end
-	local amt = api.gui.comp.TextView.new(text)
-	amt:setStyleClassList({ "rlvStatValue" })
+
+	for i = 1, #lines do
+		local line = lines[i]
+		local ok, cargos = pcall(function() return scs.getSimCargosForLine(line.id) end)
+		local items = ok and toTable(cargos) or nil
+		if items and #items > 0 then
+			local n = math.min(#items, MAX_CARGO_SAMPLES)
+			local scale = (n > 0) and (#items / n) or 1
+
+			local byType = {}
+			for k = 1, n do
+				local it = toTable(items[k]) or items[k]
+				if type(it) == "table" and here[it.sourceEntity] and it.cargoType then
+					byType[it.cargoType] = (byType[it.cargoType] or 0) + 1
+				end
+			end
+
+			for cid, c in pairs(byType) do
+				out[#out + 1] = {
+					line    = line.name,
+					color   = lineColor(line.id),
+					cargoId = cid,
+					-- Scale a sampled count back up so a capped walk still
+					-- reports a representative figure.
+					count   = math.floor(c * scale + 0.5),
+				}
+			end
+		end
+	end
+
+	table.sort(out, function(a, b)
+		if a.count ~= b.count then return a.count > b.count end
+		return tostring(a.cargoId) < tostring(b.cargoId)
+	end)
+	return out
+end
+
+--- One per-line freight row: line-coloured dot, count, cargo icon, line name.
+local function buildLineCargoRow(row)
+	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+
+	local dot = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF
+	if row.color then
+		local function level(v)
+			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
+		end
+		local idx = level(row.color[1]) * 36 + level(row.color[2]) * 6 + level(row.color[3])
+		dot:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
+	else
+		dot:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
+	end
+	layout:addItem(dot)
+
+	local amt = api.gui.comp.TextView.new(fmtCompact(row.count) or tostring(row.count))
+	amt:setStyleClassList({ "rlvLineCount" })
 	layout:addItem(amt)
+
+	local okIcon = pcall(function()
+		local iv = api.gui.comp.ImageView.new(cargoIcon(row.cargoId))
+		iv:setStyleClassList({ "rlvRowIcon" })
+		layout:addItem(iv)
+	end)
+	if not okIcon then
+		layout:addItem(api.gui.comp.TextView.new(tostring(row.cargoId)))
+	end
+
+	local name = api.gui.comp.TextView.new(tostring(row.line or "?"))
+	name:setStyleClassList({ "rlvDest" })
+	layout:addItem(name)
 
 	local comp = api.gui.comp.Component.new(ROW_NAME)
 	comp:setLayout(layout)
@@ -2676,7 +2451,9 @@ local function buildLinePassengerRow(row)
 end
 
 --- One waiting-cargo line: icon, amount, and where it is headed.
-local function buildStationCargoRow(cargoId, amount, destName)
+-- `dest` is { name, id } from cargoLineMap, or nil when no line could be
+-- attributed. The id is what makes the coloured disc possible.
+local function buildStationCargoRow(cargoId, amount, dest)
 	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
 
 	local okIcon = pcall(function()
@@ -2690,14 +2467,28 @@ local function buildStationCargoRow(cargoId, amount, destName)
 	amt:setStyleClassList({ "rlvStatValue" })
 	layout:addItem(amt)
 
-	-- U+2192 RIGHTWARDS ARROW as raw UTF-8 bytes. The engine runs Lua 5.2,
-	-- which has no \u{XXXX} escape -- using one is a load-time syntax error.
-	local ARROW = "\226\134\146"
+	-- A LINE-COLOURED DISC, not an arrow.
+	--
+	-- The arrow said "headed for", which the disc says just as well while also
+	-- identifying WHICH line at a glance -- and it matches the passenger rows,
+	-- so both halves of the panel use one visual language for "this line".
+	local col = dest and dest.id and lineColor(dest.id) or nil
+	local disc = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF
+	if col then
+		local function level(v)
+			return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
+		end
+		local idx = level(col[1]) * 36 + level(col[2]) * 6 + level(col[3])
+		disc:setStyleClassList({ "rlvLineDot", "rlvDot" .. idx })
+	else
+		disc:setStyleClassList({ "rlvLineDot", "rlvDotNone" })
+	end
+	layout:addItem(disc)
 
-	local dest = api.gui.comp.TextView.new(
-		destName and (ARROW .. " " .. destName) or (ARROW .. " --"))
-	dest:setStyleClassList({ "rlvDest" })
-	layout:addItem(dest)
+	local nameText = api.gui.comp.TextView.new(
+		(dest and dest.name) and tostring(dest.name) or "--")
+	nameText:setStyleClassList({ "rlvDest" })
+	layout:addItem(nameText)
 
 	local comp = api.gui.comp.Component.new(ROW_NAME)
 	comp:setLayout(layout)
@@ -2761,7 +2552,6 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- per-cargo destination lookup, which could not be made to work
 		-- (getSimCargosForSource errors on a station group).
 		local lines = stationLines(entityId, entity)
-		pcall(probeLinePassengers, entityId, lines)
 		local byCargo = cargoLineMap(lines)
 
 		-- PASSENGERS GET THEIR OWN PER-LINE ROWS.
@@ -2793,26 +2583,98 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 			if type(v) == "number" then hereTotal = v end
 		end
 
+		-- FREIGHT SUMMARY: everything waiting here, combined, over capacity.
+		--
+		-- The total is exact -- cargoWaiting summed across commodities.
+		-- Capacity is attempted via simCargoAtTerminalSystem.getMaxCount, whose
+		-- signature is undocumented, so several argument shapes are tried and
+		-- the figure is simply omitted if none work. A total with no
+		-- denominator is still useful; a wrong denominator is not.
+		local freightTotal, freightKinds = 0, 0
+		for i = 1, #rows do
+			if rows[i].id ~= "PASSENGERS" then
+				freightTotal = freightTotal + (rows[i].amount or 0)
+				freightKinds = freightKinds + 1
+			end
+		end
+
+		local capacity = nil
+		do
+			local scat = api.engine.system.simCargoAtTerminalSystem
+			if scat and scat.getMaxCount and freightKinds > 0 then
+				local ids = { entityId }
+				local mem = toTable(entity.stations)
+				if mem then for _, m in pairs(mem) do ids[#ids + 1] = m end end
+				local sum = 0
+				for _, sid in ipairs(ids) do
+					for term = 0, 3 do
+						local okC, v = pcall(function() return scat.getMaxCount(sid, term) end)
+						if okC and type(v) == "number" and v > 0 then sum = sum + v end
+					end
+				end
+				if sum > 0 then capacity = sum end
+			end
+		end
+
+		local cargoRowsForLines = lineCargo(entityId, entity, lines)
+
 		if #rows == 0 and not haveLinePax then
 			layout:addItem(api.gui.comp.TextView.new(_("Nothing waiting")))
 			shown = 1
 		else
 			if hereTotal then
-				layout:addItem(buildStatRow(_("Waiting here"), fmtCompact(hereTotal)))
+				-- Yellow, because this is the one exact per-stop figure on the
+				-- panel -- everything below it is a whole-line total. The colour
+				-- is doing the work the labels cannot do in a narrow column.
+				layout:addItem(buildIconStatRow("ui/hud/cargo_passengers.tga",
+					_("Waiting here"), fmtCompact(hereTotal), "rlvHighlight"))
+				layout:addItem(buildSpacer())
 				shown = shown + 1
 			end
 			for i = 1, #paxRows do
 				layout:addItem(buildLinePassengerRow(paxRows[i]))
 				shown = shown + 1
 			end
-			for i = 1, #rows do
-				-- Skip the combined passenger row when the per-line breakdown
-				-- above already covers it; showing both would double-count.
-				if not (haveLinePax and rows[i].id == "PASSENGERS") then
-					layout:addItem(buildStationCargoRow(
-						rows[i].id, rows[i].amount, byCargo[rows[i].id]))
-					shown = shown + 1
+			-- Rule under the per-line block, separating it from the freight rows
+			-- and throughput figures that follow.
+			if #paxRows > 0 then
+				layout:addItem(buildDivider())
+			end
+			-- FREIGHT: summary line, then one row per line-and-commodity.
+			--
+			-- Mirrors the passenger block above -- an exact station figure, then
+			-- the per-line detail beneath it -- so both halves of the panel read
+			-- the same way.
+			if freightTotal > 0 then
+				local txt = fmtCompact(freightTotal) or tostring(freightTotal)
+				if capacity then
+					txt = txt .. " / " .. (fmtCompact(capacity) or tostring(capacity))
 				end
+				layout:addItem(buildIconStatRow("ui/hud/cargo_goods.tga",
+					_("Freight here"), txt, "rlvHighlight"))
+				layout:addItem(buildSpacer())
+				shown = shown + 1
+			end
+
+			for i = 1, #cargoRowsForLines do
+				layout:addItem(buildLineCargoRow(cargoRowsForLines[i]))
+				shown = shown + 1
+			end
+
+			-- Fall back to the flat per-commodity list when nothing could be
+			-- attributed to a line -- better a plain total than an empty block.
+			if #cargoRowsForLines == 0 then
+				for i = 1, #rows do
+					if not (haveLinePax and rows[i].id == "PASSENGERS") then
+						layout:addItem(buildStationCargoRow(
+							rows[i].id, rows[i].amount, byCargo[rows[i].id]))
+						shown = shown + 1
+					end
+				end
+			end
+
+			if freightTotal > 0 or #cargoRowsForLines > 0 then
+				layout:addItem(buildDivider())
 			end
 		end
 
@@ -2822,8 +2684,12 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- really the station's two throughput DIRECTIONS: items put onto
 		-- vehicles here versus taken off here. Outbound/Inbound says that
 		-- directly, and works for passengers as well as freight.
-		layout:addItem(buildStatRow(_("Outbound/yr"), fmtValue(rateOf(entity.itemsLoaded))))
-		layout:addItem(buildStatRow(_("Inbound/yr"), fmtValue(rateOf(entity.itemsUnloaded))))
+		-- Muted: throughput is background context, not the thing you opened the
+		-- panel for. Greying it keeps the line rows and the heading dominant.
+		layout:addItem(buildStatRow(_("Outbound/yr"),
+			fmtValue(rateOf(entity.itemsLoaded)), "rlvStatMuted", "rlvStatMuted"))
+		layout:addItem(buildStatRow(_("Inbound/yr"),
+			fmtValue(rateOf(entity.itemsUnloaded)), "rlvStatMuted", "rlvStatMuted"))
 
 		-- Line names now sit on the cargo rows themselves, so no separate list.
 	else

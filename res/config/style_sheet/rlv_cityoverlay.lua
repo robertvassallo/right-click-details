@@ -723,11 +723,116 @@ a("rlvDetailsOptions Button::Text", {
 	a("rlvCityOverlayPanel TextView!rlvDot214", { color = ssu.makeColor(255, 255, 204) })
 	a("rlvCityOverlayPanel TextView!rlvDot215", { color = ssu.makeColor(255, 255, 255) })
 
-	a("rlvCityOverlayPanel TextView!rlvLineDot", {
-		fontSize = 14,
-		color = ssu.makeColor(150, 165, 180),
+	-- The one exact per-stop figure on the panel. Yellow because every number
+	-- under it is a whole-line total, and in a narrow column the colour
+	-- separates the two faster than any label can.
+	--
+	-- Matches BulldozerButton::Icon's yellow (game-menu.lua:151) so it reads as
+	-- the game's own highlight rather than an arbitrary colour.
+	-- Throughput figures: background context, deliberately recessive so the
+	-- line rows and the panel heading stay dominant. Same grey as the muted
+	-- destination text already used on cargo rows.
+	a([[rlvCityOverlayPanel TextView!rlvStatMuted]], {
+		fontSize = 12,
+		color = ssu.makeColor(130, 145, 160),
+		gravity = { 1.0, 0.5 },
+	})
+
+	-- Leading icon on an icon-led stat row. scaling ONLY -- the passengers
+	-- texture is 16x32, so any fixed box distorts it (see the icon aspect-ratio
+	-- note further down).
+	a("rlvCityOverlayPanel ImageView!rlvRowIcon", {
+		scaling = 0.5,
 		gravity = { 0.0, 0.5 },
 		margin = { 0, 0, 4, 0 },
+	})
+
+	a("rlvCityOverlayPanel TextView!rlvHighlight", {
+		fontSize = 12,
+		color = ssu.makeColor(255, 255, 0),
+		gravity = { 1.0, 0.5 },
+	})
+
+	-- THEME-AWARE HIGHLIGHT AND MUTED TEXT.
+	--
+	-- Theme overrides win by SPECIFICITY, not position -- the extra
+	-- !rlvThemelight class outranks the base rule wherever either sits.
+	--
+	-- The highlight is yellow on the dark themes, which is unreadable on light.
+	-- A dark amber keeps the same "this is the exact figure" signal while
+	-- staying legible on a pale plate.
+	a("rlvCityOverlayPanel!rlvThemelight TextView!rlvHighlight", {
+		color = ssu.makeColor(150, 95, 0),
+	})
+
+	-- Muted throughput text: recessive against a light plate rather than a dark
+	-- one, so it lightens instead of darkening.
+	a("rlvCityOverlayPanel!rlvThemelight TextView!rlvStatMuted", {
+		color = ssu.makeColor(120, 132, 145),
+	})
+
+
+	-- Blank vertical gap. size {-1, N}: -1 is the FILL sentinel for width, N the
+	-- height in pixels -- same idiom as the divider directly below.
+	a("rlvCityOverlaySpacer", {
+		size = { -1, 6 },
+	})
+
+	-- Geometry only -- NO colour here.
+	--
+	-- This rule is declared AFTER the 216 rlvDot* classes, so any `color` it set
+	-- would win the cascade and repaint every line dot the same grey. That is
+	-- exactly what happened: the runtime was picking the right class all along
+	-- (log: "rgb 247 129 129 -> class rlvDot201") and this rule silently
+	-- overrode it.
+	--
+	-- The fallback for a line with no colour is rlvDotNone below, applied from
+	-- Lua instead, so it cannot clobber a real colour.
+	-- fontSize sets the DISC SIZE: the dot is a U+25CF glyph, not an image, so
+	-- its diameter is font metrics. 18 against the row's 12pt text gives a disc
+	-- that reads as a line marker rather than a bullet point.
+	-- The count on a per-line row. Left-aligned and fixed-width so the numbers
+	-- form a column between the dots and the names; rlvStatValue right-aligns
+	-- for label/value rows and would push it away from its dot.
+	a("rlvCityOverlayPanel TextView!rlvLineCount", {
+		fontSize = 12,
+		color = ssu.makeColor(210, 220, 230),
+		-- RIGHT-aligned inside a fixed column. Left alignment gave a ragged gap:
+		-- a 2-digit count sat at the column's left edge with ~20px of air before
+		-- the line name, so nothing lined up and the pair read as disconnected.
+		-- Right alignment puts every number's last digit on the same x, and puts
+		-- all of them hard against the name.
+		gravity = { 1.0, 0.5 },
+		minSize = { 30, -1 },
+		margin = { 0, 0, 4, 0 },
+	})
+	-- The per-line count is near-white for the dark themes and would disappear
+	-- on a pale plate.
+	--
+	-- Placement does not matter for THEME overrides: the extra !rlvThemelight
+	-- class makes them more specific than the base rule, and specificity beats
+	-- declaration order here. The six pre-existing light overrides sit ~200
+	-- lines BEFORE their bases and have always worked.
+	--
+	-- Order only decides between rules of EQUAL specificity on the same element
+	-- -- which is what made every line dot grey when rlvLineDot carried a colour
+	-- alongside rlvDot<n>.
+	a("rlvCityOverlayPanel!rlvThemelight TextView!rlvLineCount", {
+		color = ssu.makeColor(24, 30, 38),
+	})
+
+	a("rlvCityOverlayPanel TextView!rlvLineDot", {
+		fontSize = 18,
+		gravity = { 0.0, 0.5 },
+		-- Fixed width so the dot occupies the same column on every row; without
+		-- it the glyph's own advance width varies with the theme font and the
+		-- counts beside it drift row to row.
+		minSize = { 16, -1 },
+		margin = { 0, 0, 3, 0 },
+	})
+
+	a("rlvCityOverlayPanel TextView!rlvDotNone", {
+		color = ssu.makeColor(150, 165, 180),
 	})
 
 	-- ICON ASPECT RATIO -- two separate traps here, both hit in earlier builds:

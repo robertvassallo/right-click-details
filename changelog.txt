@@ -4,6 +4,46 @@
 
 
 ================================================================
+ v1.6
+================================================================
+
+NEW
+
+* Station readouts are now broken down BY LINE, with each line's
+  own colour as a leading dot.
+
+  Passengers show the exact number waiting at the stop, then each
+  line serving it with the people travelling on that line. The two
+  answer different questions: whether this stop is backing up, and
+  which of its lines needs more capacity.
+
+  Freight shows the total waiting here over the station's capacity,
+  then one row per line and commodity - and those counts ARE for
+  this stop specifically.
+
+* Large figures are abbreviated, so 62500 reads as 62.5K instead of
+  stretching the panel.
+
+* Freight stations no longer list passenger lines with a zero
+  beside them, which made a cargo yard look like a passenger
+  interchange.
+
+
+CHANGED
+
+* Waiting totals are highlighted and carry their commodity icon, so
+  the exact station figure stands apart from the per-line numbers
+  below it. The highlight adapts to the panel theme - it was
+  unreadable on the light theme.
+
+* Throughput figures (Outbound/Inbound) are greyed, so they sit
+  behind the line detail rather than competing with it.
+
+* Cargo rows show the line's colour disc instead of an arrow,
+  matching the passenger rows.
+
+
+================================================================
  v1.5
 ================================================================
 

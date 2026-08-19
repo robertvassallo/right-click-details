@@ -29,6 +29,18 @@ NEW
   interchange.
 
 
+FIXED
+
+* A line could show its colour at one station and a plain grey dot
+  at another, and occasionally a line was missed from a station's
+  list entirely.
+
+  The mod works out which lines serve a station from the game's
+  line-stop data, and what comes back is not always the line itself.
+  Where it was something else, the colour lookup found nothing and
+  the name could be wrong. Entries are now checked before use.
+
+
 CHANGED
 
 * Waiting totals are highlighted and carry their commodity icon, so

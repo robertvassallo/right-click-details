@@ -3,12 +3,33 @@
 Right-click a town, industry, station or depot in Transport Fever 2 for a
 compact readout, without opening the full window.
 
-**Version 1.2** — see `changelog.txt`.
+**Version 1.6** — see `changelog.txt`.
 
-Settings live behind the mouse button on the right of the HUD bar: panel on/off,
-how the panel closes, theme, and debug logging. They persist through the game
-script's `save()`/`load()`, so they are stored **with the savegame** — change a
-setting and save, or wait for an autosave, or it reverts.
+## What it shows
+
+- **Towns** — population, and the commodities they want with supply and fill
+  percentage.
+- **Industries** — level, transport rating, produced and shipped, stored versus
+  used per input commodity.
+- **Stations and stops** — broken down BY LINE, each with its own colour disc.
+  Passengers show the exact number waiting at the stop, then per-line totals.
+  Freight shows what is waiting here against capacity, then a row per line and
+  commodity. Throughput sits underneath, greyed.
+- Right-click the same spot again to cycle through anything else nearby.
+- Figures over 10000 are abbreviated (62500 → 62.5K).
+
+Settings live behind the mouse button in the HUD bar, beside the bulldozer:
+panel on/off, how the panel closes, town-name mode, theme, and a ladybug debug
+toggle in the footer.
+
+Settings are stored **with the savegame** via the game script's `save()`/
+`load()` — change one and save, or wait for an autosave, or it reverts.
+
+They are also broadcast between script contexts with
+`game.interface.sendScriptEvent` / `handleEvent`. That is not optional: the mod
+runs in more than one Lua context, each with its own copy of the settings table,
+and the panel writes to a different one than `save()` reads. Without the
+broadcast, every choice is silently lost on reload — see v1.5 in the changelog.
 
 `severityAdd` and `severityRemove` are both `NONE`, so the mod can be added to
 and removed from an existing save freely; the settings table is additive and is
@@ -94,7 +115,9 @@ the mod was renamed. They are folder-independent and not player-visible.
 
 ## Engine notes worth keeping
 
-Findings that cost real time to establish:
+Findings that cost real time to establish. **[API-NOTES.md](API-NOTES.md)** has
+the full set plus links to the official reference — read `api.type` there first,
+since it documents the component layouts that were otherwise guessed at.
 
 - **`api.engine.system.*` returns userdata, not tables.** `game.interface.*`
   returns Lua tables. Guarding with `type(x) == "table"` silently discards every
@@ -119,6 +142,28 @@ Findings that cost real time to establish:
   strings; the parser rejects anything else — no `%`, `px` or `em`.
 - **The mod folder's `_N` suffix is the major version.** Do not declare
   `majorVersion` in `mod.lua`; no shipped mod does.
+- **UI art is 8-bit greyscale coverage, and `color` on an ImageView only tints
+  RGBA.** A mode `L` file in an ImageView renders raw and comes out grey —
+  including the game's own icons. Tinting works via `backgroundImage` +
+  `backgroundColor1/2` on a **Button**, but a Button's background composites
+  *over* its children. Hence the baked toolbar texture and the two baked ladybug
+  variants. When inspecting engine art in Python, check `Image.open(p).mode`
+  first: `.convert("RGBA")` fabricates an opaque alpha and hides this.
+- **`setColor` is unusable.** It exists as a bound method but rejects every
+  argument form, and `api.gui.util` has no `Color` type. Runtime colouring must
+  go through `setStyleClassList`, so the colour has to already exist as a class
+  — which is why the stylesheet carries a 216-entry quantised colour grid.
+- **Userdata `__index` is often a FUNCTION.** `toTable()` returning nil does not
+  mean opaque — try the field name. `ConstructionDesc` and the `COLOR` vector
+  both behave this way. The colour vector is **1-based**.
+- **Style rules resolve by SPECIFICITY, not declaration order.** A
+  `!rlvThemelight` override outranks its base wherever it sits. Order only
+  decides between rules of *equal* specificity on the same element — which is
+  what made every line dot grey when `rlvLineDot` carried a colour alongside
+  `rlvDot<n>`.
+- **The mod runs in more than one Lua context**, each with its own module state.
+  `load()` also runs *before* `guiInit`. Both bite settings persistence; see
+  v1.5 in the changelog.
 - **Engine containers nest.** Stored stock lives behind
   `stockListSystem.getCargoType2stockList2sourceAndCount()`, and its innermost
   `sourceAndCount` value is *another* container (its metatable exposes
@@ -138,19 +183,36 @@ is not enough. Game-script changes come back on a save reload.
 ~/.steam/steam/userdata/24778163/1066780/local/crash_dump/stdout.txt
 ```
 
+That file contains null bytes, so plain `grep` reports nothing and exits 1 —
+use `grep -a`.
+
+The repo lives outside the staging area; `./deploy.sh` copies only the shipping
+subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
+`LICENSE` out of anything published. `--dry` previews.
+
 ## Known gaps
 
 - The panel's percentage is `supply / limit`, not the growth-contribution `%`
   from the town window — that is computed in C++ and not exposed.
-- **Rate figures will not match the industry window, by design.** Ours are
-  trailing-twelve-month totals from the entity's `_lastYear` accumulators;
-  the window shows a live rate over capacity (`30/100`) computed internally.
-  `getIndustryProduction` / `ProductionLimit` / `Shipping` all fail their
-  pcall, and capacity is `baseCapacity * (level+1)` with `baseCapacity` in each
-  industry's config rather than on the entity — so neither half of the window's
-  figure is reachable. Labels carry `/yr` so the difference is stated rather
-  than looking like a bug. `Stored` is exempt: it is a live level and should
-  match.
+- **Produced / Shipped / Used are LIFETIME totals, not rates.** An earlier
+  version of this file claimed they were trailing-twelve-month figures from the
+  entity's `_lastYear` accumulators. That was wrong for three releases: those
+  buckets exist in the shape but are **never populated** — both read zero on a
+  well that had produced 817946 and shipped 279067. Only `_sum` carries data,
+  and it is cumulative since the industry was built. Labels no longer say
+  `/yr`. A real rate needs sampling `_sum` against
+  `game.interface.getGameTime().time` and differencing — see PLAN.md §2.
+- **The low-stock highlight is currently disabled.** It divided stored by
+  consumption expecting a rate; against a lifetime total the ratio vanishes and
+  every row would flag as a bottleneck. Returns when a rate exists.
+- **Passenger counts per line are route-wide, not per-stop.** A `SIM_PERSON`
+  carries no field naming the stop it waits at — `targetOrAtEntity` and
+  `destinations[1]` both resolve to destination *buildings*. The "waiting here"
+  total and the freight rows ARE exact for the stop, so the two do not
+  reconcile. Full list of ruled-out routes in `API-NOTES.md`.
+- **Stored is combined on multi-input industries.** The slot ordinal is the
+  index into the construction's `stocks` array in declaration order, but no
+  runtime route to that array exists — `STOCK_LIST` is opaque to Lua.
 - Industry capacity (the `/400` the window shows) cannot be read: it is
   `baseCapacity * (level+1)` per `industryutil.lua:146`, and `baseCapacity`
   lives in each industry's own config rather than on the entity.

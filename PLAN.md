@@ -27,6 +27,12 @@ beside the bulldozer.
 
 ## Findings that cost real time — do not relearn these
 
+**See [API-NOTES.md](API-NOTES.md)** for the full reference: official
+documentation links plus everything established by probing — component layouts,
+texture/tinting rules, userdata access, script contexts, entity shapes. The
+summary below is the short version.
+
+
 **Textures and tinting.** The engine's UI art is 8-bit GREYSCALE (PIL mode `L`,
 TGA bpp 8) used as a coverage mask. `color` on an ImageView only tints **RGBA**
 art — a mode `L` file in an ImageView renders raw and comes out grey, ignoring

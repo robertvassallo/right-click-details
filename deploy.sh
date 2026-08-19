@@ -36,6 +36,7 @@ rsync "${ARGS[@]}" \
   --exclude '.gitignore' \
   --exclude 'tools/' \
   --exclude 'PLAN.md' \
+  --exclude 'API-NOTES.md' \
   --exclude 'README.md' \
   --exclude 'LICENSE' \
   --exclude '.luarc.json' \

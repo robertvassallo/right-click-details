@@ -106,8 +106,13 @@ A real rate therefore needs sampling `_sum` against
     SIM_PERSON  cargoType, targetOrAtEntity, destinations, moveModes,
                 travelTimes, landUse2ReachableLines, ...
 
-Persons have **no** `sourceEntity`. `targetOrAtEntity` is that individual's
-destination, unique per person -- it is not the stop they are waiting at.
+On a SIM_CARGO, `sourceEntity` is where the item STARTED, not where it is now,
+and `vehicleUsed` says whether it is currently aboard. Neither locates a waiting
+item at a stop -- see "Per-station attribution" below.
+
+Persons have **no** `sourceEntity`. `targetOrAtEntity` is the current leg's
+target, matching one entry in `destinations` -- it is not the stop they are
+waiting at.
 
 ### Industry stock slots
 
@@ -119,21 +124,49 @@ No runtime route to that array has been found: `ConstructionDesc.stocks`,
 `.placementParams`, `.updateFn` are all nil, and `STOCK_LIST` is opaque. Do not
 parse the shipped `.con` files -- cargo mods override them.
 
-### Per-station attribution: cargo YES, passengers NO
+### Per-station attribution: NEITHER cargo NOR passengers
 
-`getSimCargosForLine(lineId)` returns items carrying **`sourceEntity`** -- the
-entity the item is waiting at. Filtering a line's freight by station is therefore
-a field test on data already in hand, no per-entity lookups.
+Nothing the API exposes says which stop a waiting item or person is queued at.
+Both halves of this were once believed solved; both were measurement errors, and
+both shipped.
 
-`SIM_PERSON` has no equivalent. Probed and ruled out, all against a live save:
+**Cargo.** `getSimCargosForLine(lineId)` returns cargo **in transit only** --
+items already loaded onto vehicles. Probed on two lines against a live save: 436
+of 436 and 395 of 395 items had `vehicleUsed = true`, and not one was waiting. It
+answers "what is this line carrying", never "what is waiting HERE".
+
+`sourceEntity` on those items is the **ORIGIN**, not the current location: every
+sampled item shared one `sourceEntity` (the producing industry) while
+`targetEntity` varied. An earlier version of this file called it "the entity the
+item is waiting at", and v1.6 shipped a per-line freight breakdown built on that
+reading. The filter matched nothing, the loop body never ran, and the feature
+silently rendered no rows for a whole release. Do not rebuild it on this call.
+
+Note also that `getSimCargosForLine` returns **entity ids, not item tables**. A
+`type(it) == "table"` guard on them is false for every item, which turns a broken
+walk into a confident zero rather than an error. Resolve each id through
+`game.interface.getEntity` first.
+
+The only route left is `simCargoAtTerminalSystem`, which wants a transport
+network entity -- and nothing yields one, see below.
+
+**Passengers.** `SIM_PERSON` has no `sourceEntity` at all. Probed and ruled out,
+all against a live save:
 
     station entity              cargoWaiting totals only; no per-line split, no
                                 person ids to intersect
     SIM_PERSON.sourceEntity     does not exist
-    SIM_PERSON.targetOrAtEntity 21 distinct values, every one a CONSTRUCTION --
-                                the person's destination BUILDING
+    SIM_PERSON.targetOrAtEntity the CURRENT LEG's target, not the stop: it equals
+                                .destinations[n] for the leg the person is on, so
+                                its index measures journey progress. 21 distinct
+                                values, every one a CONSTRUCTION -- a destination
+                                BUILDING, never the station group
     SIM_PERSON.destinations[1]  26 distinct, all CONSTRUCTION, none the station
     simPersonAtTerminalSystem   only getEdgeInfoMap/getNumFreePlaces/getPos01
+    TRANSPORT_NETWORK component ABSENT on stations. Probed on four: getComponent
+                                returns ok=true, type=nil -- on the station group
+                                AND on every member station. This is why no
+                                terminal call can be reached
     getSimPersonsAtTerminalForTransportNetwork(tnEntity)
                                 documented as "persons waiting at the given
                                 transport network" -- but nothing yields a
@@ -146,9 +179,13 @@ a field test on data already in hand, no per-entity lookups.
                                 getLineVehicles yields nothing usable from
                                 lineSystem or game.interface
 
-So passenger figures can only be route-wide. Two measurement mistakes wasted a
-lot of time here and are worth avoiding: passing a station id where a network
-entity was wanted, and calling `#t` on a return documented as a key-value map.
+So passenger figures can only ever be route-wide, and waiting freight can only be
+reported per commodity for the station as a whole. That is what the mod ships as
+of v1.7.
+
+Two measurement mistakes wasted a lot of time here and are worth avoiding:
+passing a station id where a network entity was wanted, and calling `#t` on a
+return documented as a key-value map.
 
 ### Opening an entity's window
 

@@ -205,11 +205,18 @@ subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
 - **The low-stock highlight is currently disabled.** It divided stored by
   consumption expecting a rate; against a lifetime total the ratio vanishes and
   every row would flag as a bottleneck. Returns when a rate exists.
-- **Passenger counts per line are route-wide, not per-stop.** A `SIM_PERSON`
-  carries no field naming the stop it waits at — `targetOrAtEntity` and
-  `destinations[1]` both resolve to destination *buildings*. The "waiting here"
-  total and the freight rows are for the stop specifically, so the two do not
-  reconcile. Full list of ruled-out routes in `API-NOTES.md`.
+- **Per-stop attribution is unavailable for passengers AND for freight.** A
+  `SIM_PERSON` carries no field naming the stop it waits at —
+  `targetOrAtEntity` is the current leg's target and `destinations[1]` a
+  destination *building* — so per-line passenger counts are route-wide.
+  Freight fails for a different reason: `getSimCargosForLine` returns only cargo
+  already aboard a vehicle (probed twice: 436/436 and 395/395 items with
+  `vehicleUsed`), and its `sourceEntity` is the ORIGIN rather than the current
+  location. v1.6 shipped a per-line freight breakdown built on that misreading;
+  the filter matched nothing and it rendered no rows. Waiting freight is
+  therefore reported per commodity for the station as a whole. The "waiting
+  here" total IS exact for the stop, so it will not reconcile with the
+  route-wide per-line figures. Full list of ruled-out routes in `API-NOTES.md`.
 - **Stored is combined on multi-input industries.** The slot ordinal is the
   index into the construction's `stocks` array in declaration order, but no
   runtime route to that array exists — `STOCK_LIST` is opaque to Lua.

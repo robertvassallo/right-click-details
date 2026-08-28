@@ -22,7 +22,7 @@ ARGS=(-a --delete)
 
 # EXCLUDES -- development-only, must never reach the Workshop.
 #   .git/ .gitignore   version control
-#   tools/             icon generators; need Python + PIL, useless to players
+#   tools/             icon generators and a parked API probe; dev-only
 #   PLAN.md            internal notes
 #   .luarc.json        editor config
 #   deploy.sh          this script

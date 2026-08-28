@@ -103,6 +103,7 @@ res/scripts/rlv_cityoverlay_config.lua      values shared with mod.lua
 res/textures/ui/rlvcityoverlay/             generated bevel 9-slice
 tools/make_bevel.py                         regenerates that bevel
 tools/make_mouse_icon.py                    regenerates the toolbar icon
+tools/probe_terminal_pax.lua                parked API probe, never shipped
 changelog.txt                               release notes
 image_00.tga                                in-game thumbnail, 320x180 TGA
 workshop_preview.jpg                        Steam Workshop preview, 640x360

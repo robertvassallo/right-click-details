@@ -208,7 +208,7 @@ subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
 - **Passenger counts per line are route-wide, not per-stop.** A `SIM_PERSON`
   carries no field naming the stop it waits at — `targetOrAtEntity` and
   `destinations[1]` both resolve to destination *buildings*. The "waiting here"
-  total and the freight rows ARE exact for the stop, so the two do not
+  total and the freight rows are for the stop specifically, so the two do not
   reconcile. Full list of ruled-out routes in `API-NOTES.md`.
 - **Stored is combined on multi-input industries.** The slot ordinal is the
   index into the construction's `stocks` array in declaration order, but no

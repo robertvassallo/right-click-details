@@ -4,6 +4,48 @@
 
 
 ================================================================
+ v1.7
+================================================================
+
+FIXED
+
+* Freight rows named the wrong line. At any station where two lines
+  carry the same commodity, both collapsed into a single row
+  labelled with whichever line happened to be found first - so a
+  stop served by two liquid lines showed one and hid the other.
+
+  The mod paired a commodity with a line by asking each line what it
+  carries and taking the first match. That is only correct where one
+  line serves a commodity, which is not true at an interchange.
+
+  A line is now named ONLY when it is the sole carrier of that
+  commodity at the stop. Where two or more carry it the row reads
+  "2 lines" and shows no colour, because the game does not record
+  which line a waiting item is queued for. The amounts were always
+  exact and are unchanged.
+
+* The per-line freight breakdown added in v1.6 never actually ran.
+  It filtered on a field holding where cargo came FROM rather than
+  where it waits, so it matched nothing and silently produced no
+  rows - every station fell through to the per-commodity list. That
+  code is removed rather than repaired: the call it relied on
+  returns only cargo already loaded onto vehicles, so it could never
+  have answered what is waiting at a stop.
+
+
+CHANGED
+
+* Town panels now match the station panels. Commodity figures line
+  up in a column with their percentages recessive behind them, and a
+  rule separates the population line from the list - the same
+  treatment the station panels got in v1.6.
+
+* A station lists at most ten lines, and says so in the log when it
+  trims.
+
+
+
+================================================================
  v1.6
 ================================================================
 
@@ -18,8 +60,11 @@ NEW
   which of its lines needs more capacity.
 
   Freight shows the total waiting here over the station's capacity,
-  then one row per line and commodity - and those counts ARE for
-  this stop specifically.
+  then one row per line and commodity. Those rows ARE attributed to
+  this stop rather than the whole route - each item carries the stop
+  it is waiting at. On a line holding more than 120 items the counts
+  are sampled and scaled, so a per-line row is close rather than
+  exact; the "Freight here" total above them is always exact.
 
 * Large figures are abbreviated, so 62500 reads as 62.5K instead of
   stretching the panel.

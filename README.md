@@ -3,7 +3,7 @@
 Right-click a town, industry, station or depot in Transport Fever 2 for a
 compact readout, without opening the full window.
 
-**Version 1.6** — see `changelog.txt`.
+**Version 1.7** — see `changelog.txt`.
 
 ## What it shows
 

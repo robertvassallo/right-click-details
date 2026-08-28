@@ -2146,6 +2146,8 @@ end
 --
 -- Signature unverified -- logged once, and the panel falls back to "--" per
 -- row if it does not resolve, so the amounts stay correct regardless.
+--
+-- THE CARRIER SET IS SAMPLED, so it is a lower bound. See the loop below.
 local function cargoLineMap(lines)
 	local map = {}
 	-- cargoType -> { [lineId] = lineName } for every line seen carrying it.
@@ -2200,6 +2202,25 @@ local function cargoLineMap(lines)
 		end
 
 		if conv then
+			-- SAMPLED, therefore a LOWER BOUND on who carries what.
+			--
+			-- Only the first MAX_CARGO_SAMPLES items of a line are decoded, so
+			-- a commodity this line rarely moves can fall outside the sample
+			-- and the line is never recorded as one of its carriers.
+			--
+			-- That matters because of what the caller does with the result: a
+			-- commodity with one known carrier gets that line's NAME and
+			-- COLOUR, while two or more get the neutral "N lines". Undercount
+			-- the carriers of an ambiguous commodity down to one and the panel
+			-- goes back to confidently naming a line -- the exact bug the
+			-- carriers table was added to kill, just rarer.
+			--
+			-- Left sampled deliberately. The cap is one getEntity per item and
+			-- this runs on every right-click; the industry panel already lost a
+			-- 120-entity walk for being too slow. Raising it trades a hitch on
+			-- busy saves against a rare mislabel, and the mislabel is the
+			-- cheaper failure. Documented in the v1.7 changelog so a player who
+			-- sees it knows why.
 			for j = 1, math.min(#conv, MAX_CARGO_SAMPLES) do
 				local okC, c = pcall(game.interface.getEntity, conv[j])
 				if okC and type(c) == "table" then

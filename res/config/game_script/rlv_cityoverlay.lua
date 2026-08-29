@@ -2326,6 +2326,20 @@ local function cargoLineMap(lines)
 
 	state.loggedCargoLine = true
 
+	-- TEMPORARY, remove with probeVehicles. A row showing "--" means no line
+	-- here is configured for that commodity, which is either a real finding
+	-- (goods delivered for the town, with nothing to take them onward) or a
+	-- gap in the lookup. Dump the whole configured set once so the difference
+	-- is readable rather than argued about.
+	if settings.debug and not state.loggedCarrierSet then
+		state.loggedCarrierSet = true
+		local seen = {}
+		for ctype in pairs(carriers) do seen[#seen + 1] = tostring(ctype) end
+		table.sort(seen)
+		log("carrier set: lines here are configured for [",
+			table.concat(seen, " "), "] across", tostring(#lines), "lines")
+	end
+
 	-- A line is named ONLY when it is the one line here configured for that
 	-- commodity. With two or more we cannot tell which of them a given waiting
 	-- item belongs to -- nothing records that -- so the row says "N lines" and

@@ -207,6 +207,46 @@ Do NOT build the panel against assumed field meanings. v1.6's per-line freight
 rows and the "cargo YES" note in API-NOTES were both exactly that mistake, and
 both shipped broken.
 
+### E. The station line cap — pick the right ten
+
+`MAX_STATION_LINES` is 10, and a station busier than that is handled worse than
+the constant suggests. Analysed during v1.7 but deliberately NOT fixed there;
+no save on hand has such a station, so it would have shipped untested.
+
+Three faults, in order of severity:
+
+1. **The cap can resurrect the wrong-line bug v1.7 just fixed.** `cargoLineMap`
+   only ever sees the capped list, so it can only learn about carriers among
+   the surviving lines. Where an included line and an excluded line both carry
+   a commodity, the map holds exactly one known carrier and the panel names it
+   -- with its colour -- as the sole carrier. Confidently wrong, at precisely
+   the kind of interchange where >10 lines and shared commodities co-occur.
+
+2. **You can get fewer than ten rows.** The cap slices `lineIds`, which holds
+   line STOPS, while dedup (`seen`) and the is-it-a-LINE check both happen
+   INSIDE that window. A line stopping twice burns two slots for one row; a
+   stop resolving to a non-LINE burns a slot for none. The log still says
+   "showing first 10".
+
+3. **Which ten is arbitrary** -- whatever order the engine returns stops in.
+
+The fix, and the reason it is not just "raise the cap":
+
+- Dedupe and validate BEFORE capping, so ten means ten distinct lines. Costs a
+  `getEntity` per extra stop; trivial next to the cargo walks.
+- Rank the full list and keep the busiest ten. This IS possible and the mod
+  already does it for passengers: `#getSimPersonsForLine(id)` and
+  `#getSimCargosForLine(id)` are plain array counts, one call per line, no
+  per-item resolution. `linePassengers` already sorts on the first of those.
+  Do not confuse this with per-stop attribution -- asking a line for its total
+  never requires knowing which line a waiting item belongs to.
+- Be honest that the ranking is ROUTE-WIDE. A trunk line barely calling here
+  outranks a local line that is this station's main service. Better than
+  arbitrary; not the same as "busiest here", and must not be labelled as such.
+- When the list was trimmed, suppress sole-carrier naming. If we know we did
+  not see every line, one known carrier is not a proven sole carrier -- the
+  same rule the rest of v1.7 follows.
+
 ---
 
 ## Open work — older items
@@ -272,6 +312,32 @@ Cleared for v1.4:
 - ~~`.luarc.json` ships to the Workshop~~ — the repo lives outside the staging
   area now and `deploy.sh` excludes it, along with `tools/`, `PLAN.md`,
   `README.md`, `LICENSE` and `.git/`.
+
+Cleared for v1.7:
+
+- ~~Probe code in the shipped script~~ — `probeTerminalPax` and `countKeys`
+  lifted out to `tools/probe_terminal_pax.lua`; findings written up in
+  API-NOTES. Same class of fault as `probeStockMapping` in v1.4.
+- ~~v1.6 and v1.7 changelog entries contradicting each other~~ — v1.6 restored
+  byte-for-byte to what shipped; v1.7 does the correcting.
+- ~~API-NOTES claiming per-stop cargo attribution works~~ — retracted and
+  replaced with the measured findings.
+- ~~Station throughput labelled `/yr` against a lifetime total~~ — labels are
+  now plain Outbound/Inbound, matching the industry panel.
+- ~~Version consistency~~ — `mod.lua` minorVersion 7, README, changelog and the
+  Workshop description all agree.
+- ~~Syntax~~ — `luac -p` clean on all five shipped Lua files.
+
+Outstanding for v1.7, in-game only:
+
+- Town panel: rule under the population line, figures stacking in a column,
+  and commodity icons UNCHANGED in size (the `rlvLineCount` class went on
+  those rows; `rlvCityOverlayRow ImageView` should still win on the icon).
+- An industry, a depot, and right-click cycling — plain regressions, the
+  shipped script lost 337 lines.
+- Debug log carries no `TERMINAL PAX PROBE` block.
+- A station with more than ten lines — NOT TESTABLE on the current save. See
+  roadmap item E; the cap is known to misbehave and is deferred, not fixed.
 
 Still outstanding:
 

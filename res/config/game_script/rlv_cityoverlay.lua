@@ -2465,81 +2465,6 @@ local function cargoLineMap(lines)
 	end
 
 	state.loggedCargoLine = true
-	-- TEMPORARY PROBE round 2: the terminal calls want a CARGO TYPE.
-	--
-	-- Round 1 listed the surface -- getCount, getEntity, getMaxCount, getPlace,
-	-- hasFreePlaces, supportsCargoType -- and every get* returned nil for
-	-- (id) and (id, terminal). Only getMaxCount(stationId, terminal) works, and
-	-- the mod already uses it. The names say what is missing: supportsCargoType
-	-- and getCount plainly take a cargo type, so the earlier calls were simply
-	-- one argument short. Not a dead system, an incomplete call -- the sixth
-	-- time that has been the answer in this file.
-	--
-	-- Cargo types are 1-based numeric ids (see the cargo registry).
-	-- RETIRES ONLY ON SUCCESS, so it probes whichever station you actually
-	-- care about rather than whichever you happened to click first. A one-shot
-	-- flag set up front is precisely the mistake the v1.7 probe made -- it
-	-- landed on a freight station, produced nothing, and marked itself done for
-	-- the session.
-	if settings.debug and not state.probedTerminalCargo then
-		log("=========== TERMINAL CARGO PROBE 2 ===========")
-		log("  station:", tostring(entity and entity.name), "id=", tostring(stationId))
-		local scat = api.engine.system.simCargoAtTerminalSystem
-		if scat then
-			local ids = { stationId }
-			local mem = entity and toTable(entity.stations)
-			if mem then
-				for _, m in pairs(mem) do
-					if type(m) == "number" then ids[#ids + 1] = m end
-				end
-			end
-
-			local hits = 0
-			for _, sid in ipairs(ids) do
-				for term = 0, 3 do
-					for ct = 1, 18 do
-						-- getCount(station, terminal, cargoType)
-						local okC, n = pcall(function() return scat.getCount(sid, term, ct) end)
-						if okC and type(n) == "number" and n > 0 then
-							hits = hits + 1
-							log("  getCount(", tostring(sid), term, ct, ") =", tostring(n))
-
-							-- Something is here, so ask what it IS. If a waiting
-							-- item names a line, this is where it shows up.
-							for idx = 0, 1 do
-								local okE, e = pcall(function()
-									return scat.getEntity(sid, term, ct, idx)
-								end)
-								if okE and e ~= nil then
-									log("    getEntity(..,", idx, ") ->", type(e), tostring(e))
-									if type(e) == "number" then
-										local okG, ent = pcall(game.interface.getEntity, e)
-										if okG and type(ent) == "table" then
-											describeShape("    waitingCargo", ent, 3)
-										end
-									end
-								end
-							end
-							local okP, pl = pcall(function() return scat.getPlace(sid, term, ct) end)
-							if okP and pl ~= nil then
-								log("    getPlace ->", type(pl), tostring(pl))
-							end
-						end
-					end
-				end
-			end
-			log("  non-zero getCount hits:", tostring(hits))
-			if hits > 0 then
-				-- Only now is the question answered; leave it armed otherwise
-				-- so the next station gets its turn.
-				state.probedTerminalCargo = true
-			else
-				log("  !! nothing found here -- staying armed for the next station")
-			end
-		end
-		log("=========== TERMINAL CARGO PROBE 2 END ===========")
-	end
-
 	-- A line is named ONLY when it is the one line here configured for that
 	-- commodity. With two or more we cannot tell which of them a given waiting
 	-- item belongs to -- nothing records that -- so the row says "N lines" and
@@ -2960,6 +2885,87 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- (getSimCargosForSource errors on a station group).
 		local lines = stationLines(entityId, entity)
 		local byCargo = cargoLineMap(lines)
+
+		-- TEMPORARY PROBE round 2: the terminal calls want a CARGO TYPE.
+		--
+		-- LIVES HERE, not in cargoLineMap. It was written there first, where
+		-- entityId and entity do not exist -- so every getCount ran against a
+		-- nil station and reported nothing found, six times, convincingly.
+		-- Only the station name in the log gave it away.
+		--
+		-- Round 1 listed the surface -- getCount, getEntity, getMaxCount, getPlace,
+		-- hasFreePlaces, supportsCargoType -- and every get* returned nil for
+		-- (id) and (id, terminal). Only getMaxCount(entityId, terminal) works, and
+		-- the mod already uses it. The names say what is missing: supportsCargoType
+		-- and getCount plainly take a cargo type, so the earlier calls were simply
+		-- one argument short. Not a dead system, an incomplete call -- the sixth
+		-- time that has been the answer in this file.
+		--
+		-- Cargo types are 1-based numeric ids (see the cargo registry).
+		-- RETIRES ONLY ON SUCCESS, so it probes whichever station you actually
+		-- care about rather than whichever you happened to click first. A one-shot
+		-- flag set up front is precisely the mistake the v1.7 probe made -- it
+		-- landed on a freight station, produced nothing, and marked itself done for
+		-- the session.
+		if settings.debug and not state.probedTerminalCargo then
+			log("=========== TERMINAL CARGO PROBE 2 ===========")
+			log("  station:", tostring(entity and entity.name), "id=", tostring(entityId))
+			local scat = api.engine.system.simCargoAtTerminalSystem
+			if scat then
+				local ids = { entityId }
+				local mem = entity and toTable(entity.stations)
+				if mem then
+					for _, m in pairs(mem) do
+						if type(m) == "number" then ids[#ids + 1] = m end
+					end
+				end
+
+				local hits = 0
+				for _, sid in ipairs(ids) do
+					for term = 0, 3 do
+						for ct = 1, 18 do
+							-- getCount(station, terminal, cargoType)
+							local okC, n = pcall(function() return scat.getCount(sid, term, ct) end)
+							if okC and type(n) == "number" and n > 0 then
+								hits = hits + 1
+								log("  getCount(", tostring(sid), term, ct, ") =", tostring(n))
+
+								-- Something is here, so ask what it IS. If a waiting
+								-- item names a line, this is where it shows up.
+								for idx = 0, 1 do
+									local okE, e = pcall(function()
+										return scat.getEntity(sid, term, ct, idx)
+									end)
+									if okE and e ~= nil then
+										log("    getEntity(..,", idx, ") ->", type(e), tostring(e))
+										if type(e) == "number" then
+											local okG, ent = pcall(game.interface.getEntity, e)
+											if okG and type(ent) == "table" then
+												describeShape("    waitingCargo", ent, 3)
+											end
+										end
+									end
+								end
+								local okP, pl = pcall(function() return scat.getPlace(sid, term, ct) end)
+								if okP and pl ~= nil then
+									log("    getPlace ->", type(pl), tostring(pl))
+								end
+							end
+						end
+					end
+				end
+				log("  non-zero getCount hits:", tostring(hits))
+				if hits > 0 then
+					-- Only now is the question answered; leave it armed otherwise
+					-- so the next station gets its turn.
+					state.probedTerminalCargo = true
+				else
+					log("  !! nothing found here -- staying armed for the next station")
+				end
+			end
+			log("=========== TERMINAL CARGO PROBE 2 END ===========")
+		end
+
 
 		-- PASSENGERS GET THEIR OWN PER-LINE ROWS.
 		--

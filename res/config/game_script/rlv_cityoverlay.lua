@@ -2408,6 +2408,22 @@ local function lineColor(lineId)
 		end
 	end
 
+	-- TEMPORARY, remove with probeVehicles. Log the RGB the ENGINE reports, so
+	-- "that dot looks grey" can be settled as either a lookup fault or the
+	-- line genuinely being the default uncoloured grey. Once per line.
+	if out and settings.debug then
+		state.loggedColor = state.loggedColor or {}
+		if not state.loggedColor[lineId] then
+			state.loggedColor[lineId] = true
+			local function lvl(v)
+				return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
+			end
+			log("line colour", tostring(lineId),
+				"rgb=", tostring(out[1]) .. "," .. tostring(out[2]) .. "," .. tostring(out[3]),
+				"-> rlvDot" .. tostring(lvl(out[1]) * 36 + lvl(out[2]) * 6 + lvl(out[3])))
+		end
+	end
+
 	lineColorCache[lineId] = out or false
 	return out
 end

@@ -360,23 +360,35 @@ Cleared for v1.7:
   Workshop description all agree.
 - ~~Syntax~~ — `luac -p` clean on all five shipped Lua files.
 
-Outstanding for v1.7, in-game only:
+Verified in game before v1.7 shipped:
 
-- Town panel: rule under the population line, figures stacking in a column,
-  and commodity icons UNCHANGED in size (the `rlvLineCount` class went on
-  those rows; `rlvCityOverlayRow ImageView` should still win on the icon).
-- An industry, a depot, and right-click cycling — plain regressions, the
-  shipped script lost 337 lines.
-- Debug log carries no `TERMINAL PAX PROBE` block.
-- A station with more than ten lines — NOT TESTABLE on the current save. See
-  roadmap item E; the cap is known to misbehave and is deferred, not fixed.
+- ~~Town panel~~ — rule under the population line, figures in a column, and the
+  commodity icons unchanged in size (`rlvCityOverlayRow ImageView` still wins
+  over the `rlvLineCount` class added to those rows).
+- ~~Industry, depot, station and right-click cycling~~ — all render; the depot
+  shows only its name, which item E0 explains is correct.
+- ~~No `TERMINAL PAX PROBE` output in the log~~ — confirmed on a live session.
+- ~~Freight attribution~~ — interchange showed "2 lines" with both carriers
+  listed; single-carrier stations named their line.
+- A station with more than ten lines was NOT testable — no such station on the
+  save. The cap is known to misbehave; see item E.
+
+v1.7 shipped to the Workshop as file id 3776704758 and is tagged.
+
+Outstanding for v1.8:
+
+- **REMOVE `probeVehicles` and `countKeys` from the shipped script**, and its
+  call site in showEntityPanel. Added after v1.7 to answer items D, E and E0.
+  This is the third probe to be written into this file; the first two both
+  reached a release before anyone noticed. Write the findings into API-NOTES
+  and park the instrument in `tools/`, exactly as v1.7 did.
 
 Still outstanding:
 
-- **Retest settings persistence** across a save/reload. `load()` merges
-  param-backed settings against a snapshot written at save time, so a param the
-  player changed wins while an untouched one defers to the in-game panel. Saves
-  predating the snapshot keep their stored values. Never verified end to end.
+- ~~Retest settings persistence~~ — VERIFIED in v1.7 against a live save.
+  `settings restored: debug= true ... | snapshot= true params= true` appeared
+  from both script contexts, and debug/theme survived a reload. The reason it
+  had never worked was a broadcast call that always threw; see the v1.7 entry.
 - Internal identifiers still read `rlv_cityoverlay` — config module, component
   names, texture path, log prefix. Cosmetic; not player-visible.
 - Retake the industry screenshot, and add one of the toolbar button.

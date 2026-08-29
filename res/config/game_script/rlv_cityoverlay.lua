@@ -199,7 +199,12 @@ local THEME_TEXT    = { dark = "Dark", darker = "Darker", light = "Light" }
 local settings = {
 	panelEnabled = true,
 	dismissMode  = "click",
-	townName     = "auto",
+	-- "always", not "auto". The panel's own heading is how you know WHICH town
+	-- you hit, and "auto" hid it whenever the map label was already on screen
+	-- -- which is most of the time, so the heading was usually missing exactly
+	-- when a click had landed somewhere unexpected. Panel-only setting: a save
+	-- that stored a choice still wins, so this only moves new games.
+	townName     = "always",
 	theme        = "dark",
 	debug        = false,
 }

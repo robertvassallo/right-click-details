@@ -75,6 +75,12 @@ CHANGED
 * A station lists at most ten lines, and says so in the log when it
   trims.
 
+* The town name now shows in the panel heading by default. It used
+  to appear only when the map label was hidden, which is seldom -
+  so the one line telling you WHICH town you had hit was usually
+  the line that was missing. If you have already chosen a setting
+  it is kept; this only changes new games.
+
 
 ================================================================
  v1.6

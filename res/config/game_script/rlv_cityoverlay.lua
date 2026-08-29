@@ -59,7 +59,7 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- and a station with 12 line stops reported "--" for commodities whose only
 -- carrier happened to sort eleventh. Cap rows, never data.
 -- See guiInit; bumped on each development deploy.
-local BUILD_STAMP = "r3-terminal-entity-probe"
+local BUILD_STAMP = "r4-terminal-fields"
 
 local MAX_STATION_LINES = 10
 
@@ -2889,27 +2889,22 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		local lines = stationLines(entityId, entity)
 		local byCargo = cargoLineMap(lines)
 
-		-- TEMPORARY PROBE round 3: a TERMINAL is probably an ENTITY, not 0..3.
+		-- TEMPORARY PROBE round 4: read the terminals we just found.
 		--
-		-- Round 2 passed a real station id with terminal indices 0-3 and cargo
-		-- types 1-18 and got zero hits at a station holding 263 items. So the
-		-- index is the wrong shape. api.type has StationTerminal, and
-		-- stationSystem exposes getVehicleNodeId2StationTerminalsMap and
-		-- getStationTerminalForVehicleNode -- terminals look like entities with
-		-- ids of their own.
+		-- Round 3 was the breakthrough: the STATION component IS readable, on
+		-- the MEMBER station rather than the group. API-NOTES says it "returns
+		-- nil on the group AND its members" -- wrong, and it is the claim that
+		-- has blocked per-stop attribution since v1.6. Ludlow's member exposes
+		-- 8 terminals, Whitnash West's 4.
 		--
-		-- If so, every call made here has been handing a small integer to
-		-- something that wanted an entity id, INCLUDING the getMaxCount used
-		-- for the capacity figure -- which would explain why no panel has ever
-		-- shown a denominator. API-NOTES already records that exact mistake for
-		-- getSimPersonsAtTerminalForTransportNetwork.
+		-- Two mistakes of mine to correct here: `.terminals` holds USERDATA
+		-- structs, not numbers, so the id filter rejected all of them; and the
+		-- cargo calls were tried with terminal indices 0..3 while Ludlow has 8.
 		if settings.debug and not state.probedTerminalCargo then
-			log("=========== TERMINAL ENTITY PROBE ===========")
+			log("=========== TERMINAL FIELDS PROBE ===========")
 			log("  station:", tostring(entity and entity.name), "id=", tostring(entityId))
 
-			local sys  = api.engine.system
-			local scat = sys and sys.simCargoAtTerminalSystem
-			local ss   = sys and sys.stationSystem
+			local scat = api.engine.system.simCargoAtTerminalSystem
 			local ct   = api and api.type and api.type.ComponentType
 
 			local ids = { entityId }
@@ -2920,27 +2915,46 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 				end
 			end
 
-			-- ROUTE 1: the STATION component. API-NOTES calls it nil on the
-			-- group AND its members -- but so many entries there have turned
-			-- out to be wrong calls that it is worth one honest retry.
-			local terminals = {}
-			if ct and ct.STATION then
-				for _, sid in ipairs(ids) do
-					local okC, comp = pcall(api.engine.getComponent, sid, ct.STATION)
-					log("  STATION component on", tostring(sid),
-						"ok=", tostring(okC), "type=", type(comp))
-					if okC and comp then
-						local okT, terms = pcall(function() return comp.terminals end)
-						if okT and terms ~= nil then
-							local tt = toTable(terms)
-							log("    .terminals ->", type(terms),
-								"n=", tt and tostring(#tt) or "?")
-							if tt then
-								for i = 1, math.min(#tt, 8) do
-									describeShape("    terminal[" .. i .. "]",
-										toTable(tt[i]) or tt[i], 2)
-									if type(tt[i]) == "number" then
-										terminals[#terminals + 1] = tt[i]
+			for _, sid in ipairs(ids) do
+				local okC, comp = pcall(api.engine.getComponent, sid, ct and ct.STATION)
+				if okC and comp then
+					local okT, terms = pcall(function() return comp.terminals end)
+					local tt = okT and toTable(terms) or nil
+					if tt then
+						log("  station", tostring(sid), "has", tostring(#tt), "terminals")
+
+						-- What does a StationTerminal actually carry? Ask for
+						-- names; engine userdata cannot be walked with pairs.
+						local t1 = tt[1]
+						for _, f in ipairs({ "tag", "cargo", "cargoNodes", "personNodes",
+								"vehicleNodes", "personEdges", "movePath", "id",
+								"emptyLine", "tagged" }) do
+							local okF, v = pcall(function() return t1[f] end)
+							if okF and v ~= nil then
+								log("    terminal[1]." .. f, "=", tostring(v),
+									"[" .. type(v) .. "]")
+							end
+						end
+
+						-- The cargo calls, now with EVERY terminal index this
+						-- station really has, and the member id as well.
+						if scat then
+							for term = 0, #tt - 1 do
+								local okM, mx = pcall(function()
+									return scat.getMaxCount(sid, term)
+								end)
+								if okM and type(mx) == "number" and mx > 0 then
+									log("    getMaxCount(", tostring(sid), term, ") =",
+										tostring(mx))
+								end
+								for cty = 0, 18 do
+									local okN, n = pcall(function()
+										return scat.getCount(sid, term, cty)
+									end)
+									if okN and type(n) == "number" and n > 0 then
+										log("    getCount(", tostring(sid), term, cty,
+											") =", tostring(n))
+										state.probedTerminalCargo = true
 									end
 								end
 							end
@@ -2949,47 +2963,10 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 				end
 			end
 
-			-- ROUTE 2: the node -> terminals map.
-			if ss and ss.getVehicleNodeId2StationTerminalsMap then
-				local okM, raw = pcall(ss.getVehicleNodeId2StationTerminalsMap)
-				local m = okM and toTable(raw) or nil
-				local n = 0
-				if m then for _ in pairs(m) do n = n + 1 end end
-				log("  getVehicleNodeId2StationTerminalsMap ok=", tostring(okM),
-					"entries=", tostring(n))
-				if m then
-					local shown = 0
-					for k, v in pairs(m) do
-						shown = shown + 1
-						if shown > 3 then break end
-						log("    node", tostring(k), "->", type(v))
-						describeShape("    terms", toTable(v) or v, 3)
-					end
-				end
-			end
-
-			-- Now retry the cargo calls against real terminal ids.
-			log("  candidate terminal ids:", tostring(#terminals))
-			if scat and #terminals > 0 then
-				for i = 1, math.min(#terminals, 6) do
-					local tid = terminals[i]
-					local okM, mx = pcall(function() return scat.getMaxCount(tid) end)
-					log("   getMaxCount(", tostring(tid), ") ok=", tostring(okM),
-						"->", tostring(okM and mx or nil))
-					for cty = 1, 18 do
-						local okN, n = pcall(function() return scat.getCount(tid, cty) end)
-						if okN and type(n) == "number" and n > 0 then
-							log("   getCount(", tostring(tid), cty, ") =", tostring(n))
-							state.probedTerminalCargo = true
-						end
-					end
-				end
-			end
-
 			if not state.probedTerminalCargo then
-				log("  !! still nothing -- staying armed")
+				log("  !! no cargo counts yet -- staying armed")
 			end
-			log("=========== TERMINAL ENTITY PROBE END ===========")
+			log("=========== TERMINAL FIELDS PROBE END ===========")
 		end
 
 		-- PASSENGERS GET THEIR OWN PER-LINE ROWS.

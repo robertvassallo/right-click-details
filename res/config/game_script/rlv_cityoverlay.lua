@@ -59,7 +59,7 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- and a station with 12 line stops reported "--" for commodities whose only
 -- carrier happened to sort eleventh. Cap rows, never data.
 -- See guiInit; bumped on each development deploy.
-local BUILD_STAMP = "r4-terminal-fields"
+local BUILD_STAMP = "r5-cargo-on-member"
 
 local MAX_STATION_LINES = 10
 
@@ -2889,84 +2889,86 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		local lines = stationLines(entityId, entity)
 		local byCargo = cargoLineMap(lines)
 
-		-- TEMPORARY PROBE round 4: read the terminals we just found.
+		-- TEMPORARY PROBE round 5: ask the MEMBER station for its cargo.
 		--
-		-- Round 3 was the breakthrough: the STATION component IS readable, on
-		-- the MEMBER station rather than the group. API-NOTES says it "returns
-		-- nil on the group AND its members" -- wrong, and it is the claim that
-		-- has blocked per-stop attribution since v1.6. Ludlow's member exposes
-		-- 8 terminals, Whitnash West's 4.
+		-- Round 4 closed the terminal route: a StationTerminal carries `tag`,
+		-- `personNodes` and `personEdges` and NOTHING about cargo, which is why
+		-- simCargoAtTerminalSystem finds nothing however it is keyed.
 		--
-		-- Two mistakes of mine to correct here: `.terminals` holds USERDATA
-		-- structs, not numbers, so the id filter rejected all of them; and the
-		-- cargo calls were tried with terminal indices 0..3 while Ludlow has 8.
+		-- But it also generalised something. The STATION component is nil on
+		-- the station GROUP and reads on the MEMBER. This file records
+		-- getSimCargosForSource as a "CONFIRMED FAILURE" -- and the note says
+		-- it errored "on a station group". It was never tried on a member.
+		--
+		-- Same shape as six other wrong conclusions here: one call form failing
+		-- taken as the call being dead. If waiting cargo entities come back,
+		-- each can be asked directly what it is and where it is going, which is
+		-- the attribution this feature has been inferring badly for two
+		-- releases.
 		if settings.debug and not state.probedTerminalCargo then
-			log("=========== TERMINAL FIELDS PROBE ===========")
+			log("=========== CARGO ON MEMBER PROBE ===========")
 			log("  station:", tostring(entity and entity.name), "id=", tostring(entityId))
 
-			local scat = api.engine.system.simCargoAtTerminalSystem
-			local ct   = api and api.type and api.type.ComponentType
+			local scs = api.engine.system.simCargoSystem
+			local ct  = api and api.type and api.type.ComponentType
 
-			local ids = { entityId }
+			local ids = {}
 			local mem = entity and toTable(entity.stations)
 			if mem then
 				for _, m in pairs(mem) do
 					if type(m) == "number" then ids[#ids + 1] = m end
 				end
 			end
+			ids[#ids + 1] = entityId   -- group last, so a member wins first
 
 			for _, sid in ipairs(ids) do
-				local okC, comp = pcall(api.engine.getComponent, sid, ct and ct.STATION)
-				if okC and comp then
-					local okT, terms = pcall(function() return comp.terminals end)
-					local tt = okT and toTable(terms) or nil
-					if tt then
-						log("  station", tostring(sid), "has", tostring(#tt), "terminals")
-
-						-- What does a StationTerminal actually carry? Ask for
-						-- names; engine userdata cannot be walked with pairs.
-						local t1 = tt[1]
-						for _, f in ipairs({ "tag", "cargo", "cargoNodes", "personNodes",
-								"vehicleNodes", "personEdges", "movePath", "id",
-								"emptyLine", "tagged" }) do
-							local okF, v = pcall(function() return t1[f] end)
-							if okF and v ~= nil then
-								log("    terminal[1]." .. f, "=", tostring(v),
-									"[" .. type(v) .. "]")
+				local ok, res = pcall(function()
+					return scs.getSimCargosForSource(sid)
+				end)
+				if not ok then
+					log("  getSimCargosForSource(", tostring(sid), ") ERRORED:",
+						tostring(res))
+				else
+					local t = toTable(res)
+					log("  getSimCargosForSource(", tostring(sid), ") ->", type(res),
+						"n=", t and tostring(#t) or "?")
+					if t and t[1] then
+						state.probedTerminalCargo = true
+						-- What IS a waiting item? Resolve, then ask its
+						-- components -- SIM_CARGO_AT_TERMINAL is the one that
+						-- might name a line or terminal.
+						for k = 1, math.min(#t, 3) do
+							local okE, ce = pcall(game.interface.getEntity, t[k])
+							if okE and type(ce) == "table" then
+								describeShape("    waiting[" .. k .. "]", ce, 3)
 							end
-						end
-
-						-- The cargo calls, now with EVERY terminal index this
-						-- station really has, and the member id as well.
-						if scat then
-							for term = 0, #tt - 1 do
-								local okM, mx = pcall(function()
-									return scat.getMaxCount(sid, term)
-								end)
-								if okM and type(mx) == "number" and mx > 0 then
-									log("    getMaxCount(", tostring(sid), term, ") =",
-										tostring(mx))
-								end
-								for cty = 0, 18 do
-									local okN, n = pcall(function()
-										return scat.getCount(sid, term, cty)
-									end)
-									if okN and type(n) == "number" and n > 0 then
-										log("    getCount(", tostring(sid), term, cty,
-											") =", tostring(n))
-										state.probedTerminalCargo = true
+							for _, cname in ipairs({ "SIM_CARGO", "SIM_CARGO_AT_TERMINAL" }) do
+								if ct and ct[cname] then
+									local okC, comp = pcall(api.engine.getComponent,
+										t[k], ct[cname])
+									if okC and comp then
+										log("    ", cname, "on", tostring(t[k]), "ok")
+										for _, f in ipairs({ "line", "terminal", "station",
+												"stationGroup", "cargoType", "targetEntity",
+												"sourceEntity", "nextLine", "arrivalTime" }) do
+											local okF, v = pcall(function() return comp[f] end)
+											if okF and v ~= nil then
+												log("      ." .. f, "=", tostring(v))
+											end
+										end
 									end
 								end
 							end
 						end
+						break
 					end
 				end
 			end
 
 			if not state.probedTerminalCargo then
-				log("  !! no cargo counts yet -- staying armed")
+				log("  !! nothing from any id -- staying armed")
 			end
-			log("=========== TERMINAL FIELDS PROBE END ===========")
+			log("=========== CARGO ON MEMBER PROBE END ===========")
 		end
 
 		-- PASSENGERS GET THEIR OWN PER-LINE ROWS.

@@ -84,6 +84,11 @@ local MAX_CARGO_SAMPLES = 120 -- sim-cargo items sampled when resolving
 -- projection is exposed, and game.gui.getContentRect("townhudicon") returns
 -- nil. All three routes confirmed dead by probe.
 --
+-- NOTE the third is dead for THAT ELEMENT ONLY. getContentRect itself works --
+-- getContentRect("mainView") returns { 0, 0, 2560, 1080 } and is what
+-- viewportRect uses to keep the panel on screen. A call is not dead because
+-- one argument returns nil.
+--
 -- So this is deliberately generous -- wide enough to cover a town's built-up
 -- area, where labels routinely sit over stations and depots. The cost is that
 -- clicking a station well inside a town shows the town first; one more
@@ -684,11 +689,63 @@ local function panelHost()
 	return nil, nil
 end
 
---- Put a built panel on screen near the cursor.
+--- Width and height out of an engine Size/Rect, or nil.
+--
+-- calcMinimumSize and getContentRect both hand back USERDATA rather than a
+-- table, so toTable cannot walk it and the field spelling is not documented.
+-- Try each candidate and report which answered, exactly as the settings
+-- broadcast does for its two send routes -- guessing at a shape is what this
+-- codebase keeps paying for.
+local function readWH(u)
+	local t = type(u)
+	if t ~= "userdata" and t ~= "table" then return nil end
+
+	for _, names in ipairs({ { "w", "h" }, { "width", "height" } }) do
+		local okW, w = pcall(function() return u[names[1]] end)
+		local okH, h = pcall(function() return u[names[2]] end)
+		if okW and okH and type(w) == "number" and type(h) == "number"
+				and w > 0 and h > 0 then
+			return w, h, names[1] .. "/" .. names[2]
+		end
+	end
+
+	-- A Rect is { x, y, w, h }; a Size is { w, h }. Try the tail first so a
+	-- Rect is not misread as a Size.
+	for _, idx in ipairs({ { 3, 4 }, { 1, 2 } }) do
+		local okW, w = pcall(function() return u[idx[1]] end)
+		local okH, h = pcall(function() return u[idx[2]] end)
+		if okW and okH and type(w) == "number" and type(h) == "number"
+				and w > 0 and h > 0 then
+			return w, h, "[" .. idx[1] .. "]/[" .. idx[2] .. "]"
+		end
+	end
+	return nil
+end
+
+--- The usable viewport as x, y, w, h, or nil.
+--
+-- game.gui.getContentRect("mainView") returns a plain { x, y, w, h } table --
+-- measured 0, 0, 2560, 1080. Worth noting the comment near TOWN_LABEL_RADIUS
+-- calls getContentRect dead: it IS nil for "townhudicon", but that was one
+-- element, not the call.
+local function viewportRect()
+	local ok, r = pcall(game.gui.getContentRect, "mainView")
+	if ok and type(r) == "table" and type(r[3]) == "number" and r[3] > 0 then
+		return r[1] or 0, r[2] or 0, r[3], r[4]
+	end
+	return nil
+end
+
+--- Put a built panel on screen near the cursor, KEPT INSIDE the viewport.
 --
 -- All three show* functions used to inline the same addItem call with the same
--- magic offsets. One copy instead, because keeping the panel ON SCREEN needs a
--- single place to do it -- see the probe below for what that is waiting on.
+-- magic offsets and no clamping at all, so a click low or right on the screen
+-- ran the panel off the edge -- at any size, not just tall ones.
+--
+-- Preferred position is below and slightly left of the cursor, so the panel
+-- reads as the thing under it unfolding. When that would overflow, it FLIPS to
+-- the other side of the cursor rather than merely sliding, which keeps the
+-- cursor on an edge of the panel instead of buried under it.
 local function placePanel(panel, mouseX, mouseY, what)
 	local host = panelHost()
 	if not host then
@@ -696,57 +753,41 @@ local function placePanel(panel, mouseX, mouseY, what)
 		return false
 	end
 
-	-- TEMPORARY PROBE, remove with probeVehicles.
-	--
-	-- The panel is placed down-and-right of the cursor with NO clamping, so a
-	-- click low on the screen runs it off the bottom whatever its height. The
-	-- clamp is arithmetic; what is missing is the VIEWPORT size and the panel's
-	-- OWN size, and neither has a proven source. Already ruled out: mainView
-	-- (getCameraController/getTerrainPos/stopAction only), gameUI (renderer,
-	-- view-manager and sound calls only), and game.gui.getContentRect
-	-- ("townhudicon") which returns nil.
-	--
-	-- Try every remaining candidate once and NAME whichever answers.
-	if settings.debug and not state.probedLayout then
-		state.probedLayout = true
-		log("=========== LAYOUT PROBE ===========")
-		log("mouse at", tostring(mouseX), tostring(mouseY), "panel:", tostring(what))
+	-- MEASURE, then place. Both sources were probed rather than assumed:
+	-- getContentRect("mainView") gives the viewport as a plain table, and a
+	-- Component answers calcMinimumSize() with a Size userdata.
+	local x, y = mouseX - 12, mouseY + 14
+	local vx, vy, vw, vh = viewportRect()
+	local pw, ph, how
 
-		local root = ensureOverlayRoot()
-		for label, comp in pairs({ panel = panel, root = root }) do
-			if comp then
-				for _, m in ipairs({ "getContentRect", "getRect", "calcMinimumSize",
-						"getSize", "getMinimumSize", "getPosition" }) do
-					local okM, res = pcall(function()
-						return comp[m] and comp[m](comp)
-					end)
-					if okM and res ~= nil then
-						log("  ", label .. ":" .. m .. "()", "->", type(res))
-						describeShape(label .. "." .. m, toTable(res) or res, 2)
-					end
-				end
-			end
-		end
-		if root then dumpKeys("root component", root) end
+	local okSize, size = pcall(function() return panel:calcMinimumSize() end)
+	if okSize then pw, ph, how = readWH(size) end
 
-		for _, nm in ipairs({ "mainView", "gameUI", "toolTipContainer",
-				"menu.main", "mainMenu", "root" }) do
-			local okR, r = pcall(game.gui.getContentRect, nm)
-			if okR and r ~= nil then
-				log("  getContentRect(", nm, ") ->", type(r))
-				describeShape("rect." .. nm, toTable(r) or r, 2)
-			end
-		end
-
-		dumpKeys("host layout", host)
-		log("=========== LAYOUT PROBE END ===========")
+	if not state.loggedPlace then
+		state.loggedPlace = true
+		log("place: viewport=",
+			vw and (tostring(vw) .. "x" .. tostring(vh)) or "UNKNOWN",
+			"panel=", pw and (tostring(pw) .. "x" .. tostring(ph)) or "UNKNOWN",
+			pw and ("via " .. tostring(how)) or "")
 	end
 
-	-- Hang below and slightly left of the click point so it reads as the thing
-	-- under the cursor unfolding, rather than a tooltip floating off to one
-	-- side. No clamping yet -- that is what the probe above is for.
+	if vw and pw then
+		-- FLIP rather than slide. Sliding a panel up until it fits leaves the
+		-- cursor buried in the middle of it, which then trips the mouse-move
+		-- dismissal and hides what you just opened. Flipping to the far side of
+		-- the cursor keeps the cursor on an edge.
+		if y + ph > vy + vh then y = mouseY - 14 - ph end
+		if x + pw > vx + vw then x = mouseX + 12 - pw end
+
+		-- A panel taller or wider than the screen cannot be made to fit; pin it
+		-- to the top-left corner so at least the heading is readable. That is
+		-- the case a multi-column layout would have to solve.
+		if y < vy then y = vy end
+		if x < vx then x = vx end
+	end
+
 	local ok, err = pcall(function()
-		host:addItem(panel, api.gui.util.Rect.new(mouseX - 12, mouseY + 14, 0, 0))
+		host:addItem(panel, api.gui.util.Rect.new(x, y, 0, 0))
 	end)
 	if not ok then
 		warn("failed to attach " .. tostring(what) .. " panel:", tostring(err))

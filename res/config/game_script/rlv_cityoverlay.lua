@@ -2212,7 +2212,9 @@ end
 -- Signature unverified -- logged once, and the panel falls back to "--" per
 -- row if it does not resolve, so the amounts stay correct regardless.
 --
--- THE CARRIER SET IS SAMPLED, so it is a lower bound. See the loop below.
+-- THE CARRIER SET IS A LOWER BOUND, and by a wide margin. It is built from
+-- what each line is holding RIGHT NOW, so a line running empty contributes
+-- nothing. See the loop below.
 local function cargoLineMap(lines)
 	local map = {}
 	-- cargoType -> { [lineId] = lineName } for every line seen carrying it.
@@ -2267,25 +2269,33 @@ local function cargoLineMap(lines)
 		end
 
 		if conv then
-			-- SAMPLED, therefore a LOWER BOUND on who carries what.
+			-- A LOWER BOUND ON WHO CARRIES WHAT. Two separate reasons, and
+			-- the first is much bigger than the second.
 			--
-			-- Only the first MAX_CARGO_SAMPLES items of a line are decoded, so
-			-- a commodity this line rarely moves can fall outside the sample
-			-- and the line is never recorded as one of its carriers.
+			-- 1. LIVENESS. `conv` is what this line has ABOARD at this instant.
+			--    A line that serves the stop and genuinely carries this
+			--    commodity contributes NOTHING while its vehicles are empty --
+			--    and empty is the normal state. Measured on a real save: six of
+			--    eight lines returned n=0. So the carrier set churns, and one
+			--    station can read "2 lines" one minute and a single name the
+			--    next.
 			--
-			-- That matters because of what the caller does with the result: a
-			-- commodity with one known carrier gets that line's NAME and
-			-- COLOUR, while two or more get the neutral "N lines". Undercount
-			-- the carriers of an ambiguous commodity down to one and the panel
-			-- goes back to confidently naming a line -- the exact bug the
-			-- carriers table was added to kill, just rarer.
+			-- 2. THE CAP. Only the first MAX_CARGO_SAMPLES items are decoded,
+			--    so on a heavily loaded line a rarely-moved commodity can fall
+			--    outside the sample too. Real, but dwarfed by (1).
 			--
-			-- Left sampled deliberately. The cap is one getEntity per item and
-			-- this runs on every right-click; the industry panel already lost a
-			-- 120-entity walk for being too slow. Raising it trades a hitch on
-			-- busy saves against a rare mislabel, and the mislabel is the
-			-- cheaper failure. Documented in the v1.7 changelog so a player who
-			-- sees it knows why.
+			-- Either way the caller is affected the same: a commodity with ONE
+			-- known carrier gets that line's name and colour, two or more get
+			-- the neutral "N lines". Undercount an ambiguous commodity to one
+			-- and the panel confidently names a line again -- the very bug the
+			-- carriers table was added to kill.
+			--
+			-- DO NOT try to fix this by raising the cap; the cap is not the
+			-- problem. The right source is what each line's vehicles are
+			-- CONFIGURED to carry, which does not change when a train happens
+			-- to be empty. New API surface, so it is roadmap item E rather than
+			-- a patch here. Until then the changelog and the mod description
+			-- both say a named line is the only one SEEN, not the only one.
 			for j = 1, math.min(#conv, MAX_CARGO_SAMPLES) do
 				local okC, c = pcall(game.interface.getEntity, conv[j])
 				if okC and type(c) == "table" then

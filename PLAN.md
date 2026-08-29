@@ -247,6 +247,26 @@ The fix, and the reason it is not just "raise the cap":
   not see every line, one known carrier is not a proven sole carrier -- the
   same rule the rest of v1.7 follows.
 
+And the bigger one, found while verifying v1.7 and the reason its wording had
+to be walked back before release:
+
+- **`cargoLineMap` asks the wrong question.** It builds the carrier set from
+  what each line is HOLDING at that instant, so a line that serves the stop and
+  carries the commodity contributes nothing whenever its vehicles are empty --
+  and empty is the normal state. Measured on a live save: six of eight lines
+  returned `n=0` from `getSimCargosForLine`. The set therefore churns, and one
+  station reads "2 lines" one minute and a single confident name the next.
+  Observed directly at Lutterworth East during v1.7 testing.
+
+  Raising `MAX_CARGO_SAMPLES` does not touch this -- the cap is the smaller of
+  the two effects. The right source is what each line's VEHICLES ARE
+  CONFIGURED TO CARRY, which is stable regardless of load. Unexplored; likely
+  via the line's vehicle list and each vehicle's capacities. Nothing in this
+  repo has probed it, so treat the route as unknown.
+
+  Until that exists, v1.7 ships saying a named line is the only one SEEN
+  carrying it, not the only one that does.
+
 ---
 
 ## Open work — older items

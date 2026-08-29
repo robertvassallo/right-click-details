@@ -18,20 +18,27 @@ FIXED
   carries and taking the first match. That is only correct where one
   line serves a commodity, which is not true at an interchange.
 
-  A line is now named ONLY when it is the sole carrier of that
-  commodity at the stop. Where two or more carry it, the row reads
-  "2 lines" and shows no colour - the game does not record which
-  line a waiting item is queued for - and each of those lines is
-  then listed beneath it with its own colour, so you still see who
-  runs what. The amounts were always exact and are unchanged.
+  A line is now named only where it is the only one SEEN carrying
+  that commodity. Where two or more are seen, the row reads "2
+  lines" and shows no colour - the game does not record which line a
+  waiting item is queued for - and each of those lines is listed
+  beneath it with its own colour, so you still see who runs what.
+  The amounts were always exact and are unchanged.
 
-  One limit worth knowing. Which lines carry a commodity is worked
-  out by sampling what each line is currently moving, and that
-  sample is capped so a busy save cannot stall the panel. On a very
-  heavily loaded line a rare commodity can fall outside the sample,
-  and the row will name one line where two carry it. Much rarer than
-  the bug above, but the same shape - so if a row names a line you
-  did not expect, that is why.
+  Read a named line as "the only one we could see", not as proof.
+  The check looks at what each line has ABOARD at that moment, and
+  most lines are empty most of the time - on the save this was
+  tested against, six of eight lines reported nothing in transit. A
+  line that serves the stop but happens to be running empty is
+  invisible to the check, so the same station can read "2 lines" one
+  minute and a single name the next.
+
+  That is still a long way better than what it replaces, which named
+  whichever line was found first and hid the rest. But it is not the
+  certainty a single name suggests, and saying so is cheaper than
+  having you find out. A stable answer means asking each line what
+  its vehicles are CONFIGURED to carry rather than what they happen
+  to be holding, and that is planned rather than done.
 
 * The per-line freight breakdown added in v1.6 never actually ran.
   It filtered on a field holding where cargo came FROM rather than

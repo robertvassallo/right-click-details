@@ -57,6 +57,11 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- the cap are dropped silently -- see stationLines, which logs when it trims.
 local MAX_STATION_LINES = 10
 
+-- Vehicles inspected per line when working out what that line is configured to
+-- carry. Vehicles on one line are near-always identically set up, so the first
+-- few already reveal the whole cargo set -- and this replaced a walk that cost
+-- up to MAX_CARGO_SAMPLES getEntity calls PER LINE, so it is cheaper besides.
+local MAX_LINE_VEHICLES = 8
 local MAX_CARGO_SAMPLES = 120 -- sim-cargo items sampled when resolving
                               -- destinations; a busy station holds many
 -- A click this close to a town CENTRE ranks the town first.
@@ -2203,24 +2208,29 @@ local function stationLines(stationId, entity)
 	return out
 end
 
---- Map cargo type -> name of the line it is waiting for.
+--- Map cargo type -> the lines at this station configured to carry it.
 --
--- Built by asking each line serving this station what cargo it is carrying
--- (simCargoSystem.getSimCargosForLine) and recording which types appear. That
--- is how the game's own station overview pairs a line with cargo icons.
+-- Built by asking each line serving this station what its VEHICLES ARE SET UP
+-- to haul (transportVehicleSystem.getLineVehicles, then each vehicle's
+-- `capacities`). That set does not move when a train happens to be empty.
 --
--- Signature unverified -- logged once, and the panel falls back to "--" per
--- row if it does not resolve, so the amounts stay correct regardless.
+-- It replaced a walk over what each line was HOLDING at that instant, which
+-- churned badly: empty is the normal state for a line, so carriers appeared
+-- and vanished between clicks and commodities nobody was hauling right then
+-- showed no line at all.
 --
--- THE CARRIER SET IS A LOWER BOUND, and by a wide margin. It is built from
--- what each line is holding RIGHT NOW, so a line running empty contributes
--- nothing. See the loop below.
+-- STILL NOT PER-ITEM ATTRIBUTION. Which line a given waiting crate is queued
+-- for is not recorded anywhere -- see API-NOTES. This answers the weaker but
+-- well-defined question "which lines here handle this commodity", and the
+-- panel says so by naming a line only when exactly one does.
+--
+-- The panel falls back to a hollow ring and "--" per row when nothing
+-- resolves, so the amounts stay correct regardless.
 local function cargoLineMap(lines)
 	local map = {}
 	-- cargoType -> { [lineId] = lineName } for every line seen carrying it.
 	local carriers = {}
 	local sys = api and api.engine and api.engine.system
-	local scs = sys and sys.simCargoSystem
 	local sps = sys and sys.simPersonSystem
 
 	-- PASSENGERS ARE NOT CARGO.
@@ -2250,77 +2260,76 @@ local function cargoLineMap(lines)
 		end
 	end
 
-	if not scs or not scs.getSimCargosForLine then return map end
+	-- WHAT EACH LINE IS CONFIGURED TO CARRY, not what it happens to hold.
+	--
+	-- This used to walk getSimCargosForLine -- the cargo currently ABOARD each
+	-- line -- and treat whatever it found as the carrier set. That fails badly
+	-- for a reason only a busy save makes obvious: a line with nothing loaded
+	-- right now contributes nothing, and empty is the NORMAL state. Measured:
+	-- six of eight lines returned n=0. So the set churned, a station read
+	-- "2 lines" one minute and a single confident name the next, and
+	-- commodities nobody happened to be hauling showed "--" with no line at
+	-- all.
+	--
+	-- A vehicle's `capacities` answers the stable question instead: what this
+	-- vehicle is SET UP to haul. It does not change when a train runs empty.
+	-- Line -> getLineVehicles -> each vehicle's capacities keys therefore gives
+	-- a carrier set that holds still.
+	--
+	-- NOT `allCapacities`. That is what a vehicle COULD be reconfigured to
+	-- carry -- the probe saw a logs-and-planks train reporting STEEL and
+	-- CONSTRUCTION_MATERIALS there too. It would name lines that have never
+	-- touched the commodity.
+	--
+	-- getLineVehicles lives on transportVehicleSystem. API-NOTES spent three
+	-- releases calling it useless because it was looked for on lineSystem,
+	-- which has no such function.
+	local tvs = sys and sys.transportVehicleSystem
+	if not (tvs and tvs.getLineVehicles) then return map end
 
 	for i = 1, #lines do
 		local line = lines[i]
-		local ok, cargos = pcall(function()
-			return scs.getSimCargosForLine(line.id)
+		local okV, vehicles = pcall(function()
+			return tvs.getLineVehicles(line.id)
 		end)
+		local vids = okV and toTable(vehicles) or nil
 
-		local conv = ok and toTable(cargos) or nil
 		if not state.loggedCargoLine then
-			log("getSimCargosForLine(", tostring(line.id), ") ok=", tostring(ok),
-				"raw=", type(cargos), "converted=", conv and ("n=" .. #conv) or "nil")
-			if conv and conv[1] then
-				local okC, c = pcall(game.interface.getEntity, conv[1])
-				if okC then describeShape("lineCargo[1]", c, 2) end
-			end
+			log("getLineVehicles(", tostring(line.id), ") ok=", tostring(okV),
+				"raw=", type(vehicles), "converted=",
+				vids and ("n=" .. #vids) or "nil")
 		end
 
-		if conv then
-			-- A LOWER BOUND ON WHO CARRIES WHAT. Two separate reasons, and
-			-- the first is much bigger than the second.
-			--
-			-- 1. LIVENESS. `conv` is what this line has ABOARD at this instant.
-			--    A line that serves the stop and genuinely carries this
-			--    commodity contributes NOTHING while its vehicles are empty --
-			--    and empty is the normal state. Measured on a real save: six of
-			--    eight lines returned n=0. So the carrier set churns, and one
-			--    station can read "2 lines" one minute and a single name the
-			--    next.
-			--
-			-- 2. THE CAP. Only the first MAX_CARGO_SAMPLES items are decoded,
-			--    so on a heavily loaded line a rarely-moved commodity can fall
-			--    outside the sample too. Real, but dwarfed by (1).
-			--
-			-- Either way the caller is affected the same: a commodity with ONE
-			-- known carrier gets that line's name and colour, two or more get
-			-- the neutral "N lines". Undercount an ambiguous commodity to one
-			-- and the panel confidently names a line again -- the very bug the
-			-- carriers table was added to kill.
-			--
-			-- DO NOT try to fix this by raising the cap; the cap is not the
-			-- problem. The right source is what each line's vehicles are
-			-- CONFIGURED to carry, which does not change when a train happens
-			-- to be empty. New API surface, so it is roadmap item E rather than
-			-- a patch here. Until then the changelog and the mod description
-			-- both say a named line is the only one SEEN, not the only one.
-			for j = 1, math.min(#conv, MAX_CARGO_SAMPLES) do
-				local okC, c = pcall(game.interface.getEntity, conv[j])
-				if okC and type(c) == "table" then
-					local ctype = c.cargoType or c.type
-					if ctype then
-						-- RECORD EVERY LINE, then decide afterwards.
-						--
-						-- This used to be "first line wins", on the assumption
-						-- that one line serves a commodity at a given station.
-						-- That assumption is false at any interchange, and it
-						-- is the whole bug: two lines carrying the same goods
-						-- collapsed into one row labelled with whichever was
-						-- found first, so the panel confidently named the
-						-- wrong line.
-						carriers[ctype] = carriers[ctype] or {}
-						carriers[ctype][line.id] = line.name
+		if vids then
+			-- Capped, though far cheaper than what it replaces: one getEntity
+			-- per VEHICLE rather than up to MAX_CARGO_SAMPLES per line. Vehicles
+			-- on a line are near-always identically configured, so the first few
+			-- already reveal the full cargo set.
+			for j = 1, math.min(#vids, MAX_LINE_VEHICLES) do
+				local okE, ve = pcall(game.interface.getEntity, vids[j])
+				if okE and type(ve) == "table" then
+					local caps = toTable(ve.capacities)
+					if type(caps) == "table" then
+						for ctype, amount in pairs(caps) do
+							-- A zero capacity is a slot the vehicle does not
+							-- actually offer; only positive numbers count.
+							if type(amount) == "number" and amount > 0 then
+								carriers[ctype] = carriers[ctype] or {}
+								carriers[ctype][line.id] = line.name
+							end
+						end
 					end
 				end
 			end
 		end
 	end
 
-	-- A line is named ONLY when it is the sole carrier of that commodity here.
-	-- With two or more the honest answer is that we cannot tell which, and the
-	-- row says so instead of guessing.
+	state.loggedCargoLine = true
+
+	-- A line is named ONLY when it is the one line here configured for that
+	-- commodity. With two or more we cannot tell which of them a given waiting
+	-- item belongs to -- nothing records that -- so the row says "N lines" and
+	-- lists them rather than guessing.
 	for ctype, byLine in pairs(carriers) do
 		local all = {}
 		for lid, lname in pairs(byLine) do
@@ -2333,10 +2342,10 @@ local function cargoLineMap(lines)
 		-- KEEP THE WHOLE LIST.
 		--
 		-- Which line a given waiting item is queued for is not recorded, so a
-		-- single confident label is a guess. But WHICH LINES HANDLE THIS
-		-- COMMODITY HERE is a set question, and the set is right here -- every
-		-- line serving this stop that carries this cargo. Naming them all is
-		-- both honest and more useful than naming one and hiding the rest.
+		-- single confident label would be a guess. But WHICH LINES HANDLE THIS
+		-- COMMODITY HERE is a set question with a real answer, and now a stable
+		-- one. Naming them all is both honest and more useful than naming one
+		-- and hiding the rest.
 		map[ctype] = {
 			name  = all[1] and all[1].name or nil,   -- sole carrier, when n == 1
 			id    = all[1] and all[1].id or nil,
@@ -2345,7 +2354,6 @@ local function cargoLineMap(lines)
 		}
 	end
 
-	state.loggedCargoLine = true
 	return map
 end
 

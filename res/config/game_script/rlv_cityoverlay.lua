@@ -336,21 +336,81 @@ local function settingsSignature()
 		.. "|" .. tostring(settings.debug)
 end
 
+-- WHICH CALL ACTUALLY WORKS FROM THE GUI CONTEXT.
+--
+-- game.interface.sendScriptEvent is the legacy route and it is NOT available
+-- to the GUI context -- every call threw, so the pcall swallowed it and the
+-- channel was dead from the day it was written. The log said so on every
+-- single settings change:
+--
+--     WARN: settings broadcast failed
+--     debug logging ENABLED
+--     WARN: settings broadcast failed
+--     setting: Theme -> darker
+--
+-- The engine-side instance therefore never heard about any change, save()
+-- wrote its own startup defaults, and every choice was lost on reload. The
+-- v1.5 entry claiming this was fixed describes code that never ran.
+--
+-- api.cmd is the modern route and IS available in the GUI context --
+-- api.type.SendScriptEvent shows up in this mod's own api.type dump. Its
+-- signature takes the SENDER file name first, then the id, so the arguments
+-- are not interchangeable with the legacy call.
+--
+-- Both are tried, and which one worked is logged once, because neither is
+-- verified on this machine's game build yet. Do not delete the fallback until
+-- a log confirms the api.cmd route firing.
+local function sendSettingsEvent(payload)
+	if api and api.cmd and api.cmd.make and api.cmd.make.sendScriptEvent then
+		local ok, err = pcall(function()
+			api.cmd.sendCommand(api.cmd.make.sendScriptEvent(
+				"rlv_cityoverlay.lua", SETTINGS_EVENT, "", payload))
+		end)
+		if ok then return true, "api.cmd" end
+		state.lastBroadcastErr = tostring(err)
+	end
+
+	if game and game.interface and game.interface.sendScriptEvent then
+		local ok, err = pcall(function()
+			game.interface.sendScriptEvent(SETTINGS_EVENT, "", payload)
+		end)
+		if ok then return true, "game.interface" end
+		state.lastBroadcastErr = tostring(err)
+	end
+
+	return false, nil
+end
+
 local function broadcastSettings()
 	local sig = settingsSignature()
 	if sig == state.lastBroadcastSig then return end
+
+	local ok, route = sendSettingsEvent({
+		panelEnabled = settings.panelEnabled,
+		dismissMode  = settings.dismissMode,
+		townName     = settings.townName,
+		theme        = settings.theme,
+		debug        = settings.debug,
+	})
+
+	if not ok then
+		-- DO NOT record the signature on failure.
+		--
+		-- It used to be stored before the send, so a failed broadcast marked
+		-- itself as already sent and the same settings could never be retried.
+		-- A single early failure silenced the channel for the whole session on
+		-- top of the channel being broken to begin with.
+		warn("settings broadcast failed:",
+			tostring(state.lastBroadcastErr or "no route available"))
+		return
+	end
+
 	state.lastBroadcastSig = sig
 
-	local ok = pcall(function()
-		game.interface.sendScriptEvent(SETTINGS_EVENT, "", {
-			panelEnabled = settings.panelEnabled,
-			dismissMode  = settings.dismissMode,
-			townName     = settings.townName,
-			theme        = settings.theme,
-			debug        = settings.debug,
-		})
-	end)
-	if not ok then warn("settings broadcast failed") end
+	if not state.loggedBroadcastRoute then
+		state.loggedBroadcastRoute = true
+		log("settings broadcast route:", tostring(route))
+	end
 end
 
 

@@ -58,6 +58,9 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- itself, which meant a cosmetic limit decided what cargoLineMap could see --
 -- and a station with 12 line stops reported "--" for commodities whose only
 -- carrier happened to sort eleventh. Cap rows, never data.
+-- See guiInit; bumped on each development deploy.
+local BUILD_STAMP = "r3-terminal-entity-probe"
+
 local MAX_STATION_LINES = 10
 
 -- Safety bound on vehicles read per line, NOT a sample.
@@ -3788,6 +3791,12 @@ local function guiInit()
 	-- so the messages below obey it.
 	state.initCount = (state.initCount or 0) + 1
 	seedSettingsFromParams(cfg)
+	-- BUILD STAMP. A game script only reloads when the SAVE reloads, so a
+	-- freshly deployed file can sit in the staging area while the running
+	-- session still executes the previous one -- which cost several rounds of
+	-- reading a stale log as though it described the new code. Bumped by hand
+	-- on each deploy during development; it says outright which script ran.
+	log("build:", BUILD_STAMP)
 	log("init #" .. state.initCount .. ": params", cfg and "visible" or "NOT VISIBLE",
 		"| debug=", tostring(settings.debug),
 		"| dismiss=", tostring(settings.dismissMode))

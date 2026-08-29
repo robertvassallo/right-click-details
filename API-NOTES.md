@@ -249,6 +249,35 @@ The TRANSPORT_VEHICLE component adds little over `getEntity`: `.line`, `.state`
 `getDepotVehicles` is the only route to a useful depot panel -- the depot
 entity itself is two strings, see Entity shapes.
 
+### Screen geometry -- keeping a panel on screen
+
+    game.gui.getContentRect("mainView")   -> { x, y, w, h } plain table
+                                             measured { 0, 0, 2560, 1080 }
+    component:calcMinimumSize()           -> Size USERDATA, read .w and .h
+    component:getContentRect()            -> Rect USERDATA
+
+`getContentRect` was recorded in this project as dead because it returns nil for
+`"townhudicon"`. The CALL is fine -- `"mainView"` answers immediately. One
+failing argument is not a dead function, and this is the fourth entry in these
+notes that had to be corrected for exactly that reasoning.
+
+The Size/Rect userdata cannot be walked by `toTable`; field access works, and
+the spelling is `.w` / `.h` (confirmed, logged as "via w/h" at first placement).
+
+Component surface, from a key dump of a live component:
+
+    addLifeTimeChecker addStyleClass calcMinimumSize getContentRect getCore
+    getLayout getName getParent hasFocus ...
+
+The panel host is a `CFloatingLayout`: `addItem`, `deleteAll`, `getIndex`,
+`new`, `setItemPosition`, `setPosition`. `setItemPosition` allows repositioning
+after insertion, so measure-then-move is possible if placing correctly up front
+ever stops being enough.
+
+Only BoxLayout and AbsoluteLayout are used by this mod; `api.gui.layout` has
+never been dumped, so whether a grid or scroll component exists is unknown.
+Nested BoxLayouts give columns regardless.
+
 ### Opening an entity's window
 
     comp.GameUI:getViewManager()

@@ -4,6 +4,70 @@
 
 
 ================================================================
+ v1.8
+================================================================
+
+FIXED
+
+* Freight rows could name the wrong line, or no line at all, on
+  anything larger than a starter network. Three separate faults sat
+  on top of each other, and each one hid the next.
+
+  Which lines carry a commodity was worked out from what each line
+  had ABOARD at that moment. Empty is the normal state for a line -
+  six of eight on a test save were carrying nothing - so carriers
+  appeared and vanished between clicks, and goods nobody happened to
+  be hauling showed no line at all. It now reads what each line's
+  vehicles are CONFIGURED to carry, which does not change when a
+  train runs empty.
+
+  A station serving more than ten lines had the extras discarded
+  BEFORE the lookup ran, not just before the list was drawn. A ten-
+  line display limit was deciding what data existed: a station with
+  twelve lines reported "--" for two commodities whose only carrier
+  happened to sort eleventh, while the game's own window listed it
+  the whole time. Every line is now read; only the ROWS are capped,
+  and the busiest are kept.
+
+  Finally the vehicle check itself sampled only the first few trains
+  on a line. A line's fifth train can be set up differently from its
+  first, so a commodity's only carrier was dropped at random - a row
+  naming its line correctly one minute and showing "--" the next.
+  Every train is read now.
+
+* The panel no longer runs off the edge of the screen. It was always
+  placed below and right of the cursor with no bounds check, so a
+  click low on the screen cut the panel off - at any size, not only
+  tall ones. It now flips above or left of the cursor when it would
+  overflow.
+
+  It flips rather than slides: sliding it up until it fits buries
+  the cursor inside the panel, which triggers the "closes when the
+  mouse moves" setting and hides what you just opened.
+
+* Settings are saved again. The mod runs in more than one script
+  context, and the message telling the one that writes the save
+  about a changed setting used a call that context cannot make. It
+  failed silently on every change, so every choice was lost on
+  reload. This had been broken since it was written; the v1.5 note
+  claiming it was fixed described code that never ran.
+
+
+CHANGED
+
+* A line with no colour set now shows a hollow ring instead of a
+  grey disc, so it cannot be confused with the grey ring meaning
+  "we cannot tell which line". They were previously the same colour
+  and meant different things.
+
+* Station throughput reads Outbound and Inbound rather than
+  Outbound/yr and Inbound/yr. The figures are lifetime totals since
+  the station was built and never were per-year.
+
+* The town name shows in the panel heading by default.
+
+
+================================================================
  v1.7
 ================================================================
 

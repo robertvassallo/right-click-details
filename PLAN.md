@@ -219,11 +219,16 @@ So this is not fixable from the depot entity. What makes a depot worth opening
 is WHAT IS STABLED IN IT, which is a vehicle question -- the same one items D
 and E need answered. Do not attempt this one on its own.
 
-### E. The station line cap — pick the right ten
+### E. The station line cap — SHIPPED in v1.8
 
-`MAX_STATION_LINES` is 10, and a station busier than that is handled worse than
-the constant suggests. Analysed during v1.7 but deliberately NOT fixed there;
-no save on hand has such a station, so it would have shipped untested.
+`MAX_STATION_LINES` is 10, and a station busier than that was handled worse
+than the constant suggested. Analysed during v1.7, deferred for want of a save
+that could reach it, then fixed in v1.8 once a mature network produced one --
+Spalding North, 12 line stops, two commodities orphaned.
+
+All three faults below are fixed. Kept as the record of what was wrong and why,
+because the shape of the mistake recurred twice more in the same session: a
+performance or display limit silently deciding a data answer.
 
 Three faults, in order of severity:
 
@@ -375,13 +380,18 @@ Verified in game before v1.7 shipped:
 
 v1.7 shipped to the Workshop as file id 3776704758 and is tagged.
 
-Outstanding for v1.8:
+Cleared for v1.8:
 
-- **REMOVE `probeVehicles` and `countKeys` from the shipped script**, and its
-  call site in showEntityPanel. Added after v1.7 to answer items D, E and E0.
-  This is the third probe to be written into this file; the first two both
-  reached a release before anyone noticed. Write the findings into API-NOTES
-  and park the instrument in `tools/`, exactly as v1.7 did.
+- ~~Remove `probeVehicles` and `countKeys`~~ — parked in
+  `tools/probe_vehicles.lua`, findings written up under "Vehicles" in
+  API-NOTES. The per-call carrier dump, the per-line colour dump and the empty
+  vehicle-list log went with them; the one-shot lookup traces stay, since a bug
+  report needs them.
+- ~~Un-hedge the carrier wording~~ — v1.7 had to say a named line was the only
+  one SEEN carrying a commodity. With vehicle capacities it is the only one
+  CONFIGURED to, which is a real guarantee.
+- ~~Panel running off screen~~ — placePanel clamps and flips; viewport from
+  `getContentRect("mainView")`, panel size from `calcMinimumSize()`.
 
 Still outstanding:
 

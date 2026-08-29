@@ -2426,11 +2426,12 @@ local function cargoLineMap(lines)
 		end)
 		local vids = okV and toTable(vehicles) or nil
 
-		-- Same reasoning: a first call that finds no vehicles is exactly the
-		-- symptom to catch, so this cannot be gated to one run either.
-		if settings.debug and (vids == nil or #vids == 0) then
-			log("  getLineVehicles(", tostring(line.name), ") EMPTY ok=",
-				tostring(okV), "raw=", type(vehicles))
+		-- One-shot, like the other lookup traces: enough to show the route is
+		-- alive in a bug report without narrating every click.
+		if not state.loggedCargoLine then
+			log("getLineVehicles(", tostring(line.id), ") ok=", tostring(okV),
+				"raw=", type(vehicles), "converted=",
+				vids and ("n=" .. #vids) or "nil")
 		end
 
 		if vids then
@@ -2464,25 +2465,6 @@ local function cargoLineMap(lines)
 	end
 
 	state.loggedCargoLine = true
-
-	-- TEMPORARY, remove with probeVehicles. A row showing "--" means no line
-	-- here is configured for that commodity, which is either a real finding
-	-- (goods delivered for the town, with nothing to take them onward) or a
-	-- gap in the lookup. Dump the whole configured set once so the difference
-	-- is readable rather than argued about.
-	-- EVERY CALL, not once per session. The first panel opened after a save
-	-- reload under-reports -- a commodity showed "--" and the very next click
-	-- named its line correctly. A once-per-session dump captured only one of
-	-- the two clicks, so it could not show what differed. Logging each call
-	-- makes the first and second directly comparable.
-	if settings.debug then
-		local seen = {}
-		for ctype in pairs(carriers) do seen[#seen + 1] = tostring(ctype) end
-		table.sort(seen)
-		state.carrierCalls = (state.carrierCalls or 0) + 1
-		log("carrier set #" .. tostring(state.carrierCalls), ": [",
-			table.concat(seen, " "), "] across", tostring(#lines), "lines")
-	end
 
 	-- A line is named ONLY when it is the one line here configured for that
 	-- commodity. With two or more we cannot tell which of them a given waiting
@@ -2571,22 +2553,6 @@ local function lineColor(lineId)
 		if not state.loggedNoColor[lineId] then
 			state.loggedNoColor[lineId] = true
 			log("line", tostring(lineId), "has no colour:", tostring(why))
-		end
-	end
-
-	-- TEMPORARY, remove with probeVehicles. Log the RGB the ENGINE reports, so
-	-- "that dot looks grey" can be settled as either a lookup fault or the
-	-- line genuinely being the default uncoloured grey. Once per line.
-	if out and settings.debug then
-		state.loggedColor = state.loggedColor or {}
-		if not state.loggedColor[lineId] then
-			state.loggedColor[lineId] = true
-			local function lvl(v)
-				return math.floor((math.max(0, math.min(255, v)) / 255) * 5 + 0.5)
-			end
-			log("line colour", tostring(lineId),
-				"rgb=", tostring(out[1]) .. "," .. tostring(out[2]) .. "," .. tostring(out[3]),
-				"-> rlvDot" .. tostring(lvl(out[1]) * 36 + lvl(out[2]) * 6 + lvl(out[3])))
 		end
 	end
 
@@ -2745,145 +2711,6 @@ local function buildSpacer()
 	local comp = api.gui.comp.Component.new(SPACER_NAME)
 	comp:setLayout(layout)
 	return comp
-end
-
---- TEMPORARY DIAGNOSTIC -- must not ship. See "Before release" in PLAN.md.
---
--- Answers the one question three roadmap items are all blocked on: what can we
--- learn about a VEHICLE?
---
---   D  right-click a vehicle -- needs its line, next stop and current cargo
---   E  the carrier set -- needs what a line's vehicles are CONFIGURED to carry,
---      which does not change when a train happens to be running empty
---   E0 the depot panel -- a depot entity is two strings, so the only useful
---      content is which vehicles are stabled in it
---
--- BUILT TO THE RULES THIS MOD LEARNED THE HARD WAY:
---   * every walk is capped -- the last probe did ~1600 getEntity calls a click
---   * counts go through countKeys, never `#`, on anything that may be a map
---   * ids are resolved BEFORE type-checking; getSimCargosForLine returns ids,
---     and a `type(x) == "table"` guard on those reported a confident zero
---   * pcall errors are LOGGED, never discarded -- a swallowed error is what
---     hid the broken settings broadcast for three releases
-local PROBE_ITEMS = 6
-
-local function countKeys(t)
-	if type(t) ~= "table" then return -1 end
-	local n = 0
-	for _ in pairs(t) do n = n + 1 end
-	return n
-end
-
---- Try a call, log what came back OR why it failed. Returns the value or nil.
-local function probeCall(label, fn)
-	local ok, res = pcall(fn)
-	if not ok then
-		log("  ", label, "FAILED:", tostring(res))
-		return nil
-	end
-	local t = toTable(res)
-	log("  ", label, "ok raw=", type(res),
-		"arrayN=", t and tostring(#t) or "nil",
-		"keys=", tostring(countKeys(t)))
-	return t, res
-end
-
-local function probeVehicles(stationId, entity, lines)
-	if not settings.debug or state.probedVehicles then return end
-
-	local sys = api and api.engine and api.engine.system
-	if not sys then log("VEHICLE PROBE: no api.engine.system"); return end
-
-	log("=========== VEHICLE PROBE ===========")
-
-	-- 1. WHICH SYSTEM OWNS VEHICLES? lineSystem does NOT expose getLineVehicles
-	--    on this build -- its key dump is getLineStops/getLineStopsForStation/
-	--    getLineStopsForTerminal/getLines/getLinesForPlayer/getLinesForWaypoint/
-	--    getProblemLines/getStationGroup2LineStopsMap/getTerminal2lineStops.
-	--    That is why "getLineVehicles yields nothing usable" -- it was never
-	--    there to begin with. So find the system that does have it.
-	for name, tbl in pairs(sys) do
-		if type(tbl) == "table" and tostring(name):lower():find("vehicle") then
-			local fns = {}
-			pcall(function()
-				for k in pairs(tbl) do fns[#fns + 1] = tostring(k) end
-			end)
-			table.sort(fns)
-			log("system", tostring(name), "=", table.concat(fns, " "))
-		end
-	end
-
-	-- 2. GET A VEHICLE ID, by whatever route works. Each is named so a failure
-	--    is attributable rather than "vehicles are unavailable".
-	local vid
-	local tvs = sys.transportVehicleSystem
-
-	if tvs and lines and lines[1] then
-		for i = 1, math.min(#lines, PROBE_ITEMS) do
-			if tvs.getLineVehicles then
-				local t = probeCall("transportVehicleSystem.getLineVehicles(" ..
-					tostring(lines[i].name) .. ")",
-					function() return tvs.getLineVehicles(lines[i].id) end)
-				if t and t[1] then vid = t[1]; break end
-			end
-		end
-	end
-
-	if not vid and entity and entity.position then
-		-- The route item D actually needs: can a click FIND a vehicle at all?
-		local t = probeCall("getEntities{type=VEHICLE} r=200 at station",
-			function()
-				return game.interface.getEntities(
-					{ pos = { entity.position[1], entity.position[2] }, radius = 200 },
-					{ type = "VEHICLE" })
-			end)
-		if t and t[1] then vid = t[1] end
-	end
-
-	if not vid then
-		log("  no vehicle id from any route -- nothing further to probe")
-		log("=========== VEHICLE PROBE END ===========")
-		state.probedVehicles = true
-		return
-	end
-
-	-- 3. WHAT DOES THE VEHICLE CARRY? getEntity first, the friendly view.
-	log("  probing vehicle id", tostring(vid))
-	local okE, ve = pcall(game.interface.getEntity, vid)
-	if okE and type(ve) == "table" then
-		describeShape("getEntity(vehicle)", ve, 3)
-	else
-		log("  getEntity(vehicle) FAILED:", tostring(ve))
-	end
-
-	-- 4. THE COMPONENT SIDE. api.type lists TransportVehicle,
-	--    TransportVehicleConfig, VehicleCargoInfo, TransportVehicleInfo and
-	--    VehicleInfo -- the config ones are what item E needs, because a
-	--    CONFIGURED capacity is stable while an actual load is not.
-	local ct = api and api.type and api.type.ComponentType
-	if ct then
-		for _, cname in ipairs({ "TRANSPORT_VEHICLE", "VEHICLE", "COLOR" }) do
-			if ct[cname] then
-				local okC, comp = pcall(api.engine.getComponent, vid, ct[cname])
-				log("  component", cname, "ok=", tostring(okC), "type=", type(comp))
-				if okC and comp then
-					-- Engine components come back as USERDATA whose __index is a
-					-- function, so toTable cannot walk them. Ask for names.
-					for _, f in ipairs({ "line", "lineStop0", "lineStop1", "state",
-							"cargoTypes", "capacities", "config", "userStopped",
-							"depot", "name", "doorsTime", "adjustedCapacities" }) do
-						local okF, v = pcall(function() return comp[f] end)
-						if okF and v ~= nil then
-							log("    ." .. f, "=", tostring(v), "[" .. type(v) .. "]")
-						end
-					end
-				end
-			end
-		end
-	end
-
-	log("=========== VEHICLE PROBE END ===========")
-	state.probedVehicles = true
 end
 
 -- REMOVED: lineCargo() and buildLineCargoRow().
@@ -3067,9 +2894,6 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- stop served by several lines that is the question worth asking. So the
 		-- passenger row is replaced by one row per line: coloured dot, count,
 		-- arrow, line name. Freight keeps its existing single row per commodity.
-		-- TEMPORARY. Remove before v1.8 ships -- see PLAN.md "Before release".
-		probeVehicles(entityId, entity, lines)
-
 		local paxRows = linePassengers(entityId, entity, lines)
 		local haveLinePax = #paxRows > 0
 

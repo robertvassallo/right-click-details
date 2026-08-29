@@ -207,6 +207,18 @@ Do NOT build the panel against assumed field meanings. v1.6's per-line freight
 rows and the "cargo YES" note in API-NOTES were both exactly that mistake, and
 both shipped broken.
 
+### E0. Depot panel — empty, and now we know why
+
+A right-clicked depot renders its name and nothing else. Not a rendering fault:
+`getEntity` on a VEHICLE_DEPOT returns `name` and `type`, both strings, and
+nothing more. Confirmed from a live click during v1.7 testing; the dump is in
+API-NOTES. The depot branch loops looking for numbers and accumulator tables,
+finds none, and correctly shows nothing.
+
+So this is not fixable from the depot entity. What makes a depot worth opening
+is WHAT IS STABLED IN IT, which is a vehicle question -- the same one items D
+and E need answered. Do not attempt this one on its own.
+
 ### E. The station line cap — pick the right ten
 
 `MAX_STATION_LINES` is 10, and a station busier than that is handled worse than

@@ -114,6 +114,18 @@ Persons have **no** `sourceEntity`. `targetOrAtEntity` is the current leg's
 target, matching one entry in `destinations` -- it is not the stop they are
 waiting at.
 
+A VEHICLE_DEPOT carries **nothing but two strings**. Confirmed against a live
+save, not inferred:
+
+    SHAPE getEntity(VEHICLE_DEPOT) type=table
+      name = Hendon Train depot  [string]
+      type = VEHICLE_DEPOT       [string]
+
+No id, no position, no numbers, no accumulators. So a depot panel built on
+`getEntity` can only ever show the name -- which is exactly what it does, and
+why it looks broken. Anything useful about a depot (what is stabled in it) has
+to come from the VEHICLE side, not from the depot entity.
+
 ### Industry stock slots
 
 Slot ordinal = index into the construction's `stocks` array in DECLARATION order

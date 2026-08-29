@@ -51,17 +51,20 @@ local LOCAL_RADIUS    = 45    -- stations/depots: tight, so they only win when
                               -- the click really is on them. At 90 a station
                               -- was stealing clicks meant for the town label.
 local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stall
--- Most lines listed for one station. A DELIBERATE display limit, not a
--- performance guard: past about ten rows the panel stops being a glance and
--- becomes a window, which is the thing this mod exists to avoid. Lines beyond
--- the cap are dropped silently -- see stationLines, which logs when it trims.
+-- Most line ROWS DRAWN for one station. Past about ten the panel stops being a
+-- glance and becomes a window, which is the thing this mod exists to avoid.
+--
+-- APPLIED AT THE DISPLAY, NEVER TO THE LOOKUP. It used to trim stationLines
+-- itself, which meant a cosmetic limit decided what cargoLineMap could see --
+-- and a station with 12 line stops reported "--" for commodities whose only
+-- carrier happened to sort eleventh. Cap rows, never data.
 local MAX_STATION_LINES = 10
 
--- Vehicles inspected per line when working out what that line is configured to
--- carry. Vehicles on one line are near-always identically set up, so the first
--- few already reveal the whole cargo set -- and this replaced a walk that cost
--- up to MAX_CARGO_SAMPLES getEntity calls PER LINE, so it is cheaper besides.
-local MAX_LINE_VEHICLES = 8
+-- Vehicles sampled per line when working out what that line is configured to
+-- carry. This is per VEHICLE (a whole train), and every train on a line is
+-- near-always configured identically, so a handful settles it. Four rather
+-- than eight because every line is now read, not just the first ten.
+local MAX_LINE_VEHICLES = 4
 local MAX_CARGO_SAMPLES = 120 -- sim-cargo items sampled when resolving
                               -- destinations; a busy station holds many
 -- A click this close to a town CENTRE ranks the town first.
@@ -2167,14 +2170,33 @@ local function stationLines(stationId, entity)
 
 	-- A line stop may be the line id itself, or a table carrying one.
 	local seen = {}
-	-- Trim NOTED, not silent: a station busier than the cap will be missing
-	-- rows, and that must be traceable rather than looking like a lookup bug.
+
+	-- RETURN EVERY LINE. The cap belongs to the DISPLAY, not to this.
+	--
+	-- This used to slice lineIds at MAX_STATION_LINES before doing anything
+	-- else, which was wrong twice over.
+	--
+	-- First, it sliced LINE STOPS, while dedup and the is-it-a-LINE check both
+	-- happen below -- so a line calling twice burned two slots for one row, and
+	-- a station could show well under ten lines while the log claimed ten.
+	--
+	-- Second and much worse, cargoLineMap is built from this list, so a
+	-- cosmetic limit was silently corrupting DATA. Found on a real save:
+	-- Spalding North has 12 line stops, Towcester Delivery fell outside the
+	-- first ten, and it was the only line carrying two of the commodities
+	-- waiting there. The panel dropped the line and then reported "--", exactly
+	-- as though nothing carried them. The game's own station window listed it
+	-- the whole time.
+	--
+	-- Callers cap their own OUTPUT instead, after ranking, so what gets dropped
+	-- is the quietest rows rather than whichever line the engine happened to
+	-- return eleventh.
 	if #lineIds > MAX_STATION_LINES then
 		log("stationLines: station has", tostring(#lineIds),
-			"line stops, showing first", tostring(MAX_STATION_LINES))
+			"line stops; reading all, display caps at", tostring(MAX_STATION_LINES))
 	end
 
-	for i = 1, math.min(#lineIds, MAX_STATION_LINES) do
+	for i = 1, #lineIds do
 		local stop = lineIds[i]
 		local lineId = (type(stop) == "table" and (stop.line or stop.lineEntity)) or stop
 		if type(lineId) == "number" and not seen[lineId] then
@@ -2785,7 +2807,10 @@ local function buildCargoLineList(dest)
 	local out = {}
 	if not (dest and dest.lines and #dest.lines > 1) then return out end
 
-	for i = 1, #dest.lines do
+	-- Same display cap. A commodity with more than ten carriers at one stop is
+	-- unlikely, but the count on the row above still reports the true total, so
+	-- a trimmed list cannot masquerade as a complete one.
+	for i = 1, math.min(#dest.lines, MAX_STATION_LINES) do
 		local ln = dest.lines[i]
 		local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
 
@@ -2991,7 +3016,10 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 				layout:addItem(buildSpacer())
 				shown = shown + 1
 			end
-			for i = 1, #paxRows do
+			-- Capped HERE, not in stationLines: paxRows is already sorted
+			-- busiest first, so what falls off is the quietest lines rather
+			-- than whichever the engine happened to return eleventh.
+			for i = 1, math.min(#paxRows, MAX_STATION_LINES) do
 				layout:addItem(buildLinePassengerRow(paxRows[i]))
 				shown = shown + 1
 			end

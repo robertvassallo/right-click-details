@@ -2465,6 +2465,55 @@ local function cargoLineMap(lines)
 	end
 
 	state.loggedCargoLine = true
+	-- TEMPORARY PROBE: why does a line the game credits with a commodity not
+	-- appear as its carrier? Remove before v1.8.
+	--
+	-- Whitnash West showed "--" for tools while the game's own station window
+	-- listed Whitnash Transfer carrying 22 of them, and got bricks and grain on
+	-- the same line right.
+	--
+	-- Suspicion, from the vehicle probe's own numbers: `capacities` summed to
+	-- the vehicle total (143 + 130 = 273) while `allCapacities` reported 273
+	-- for each of four types. That makes capacities the CURRENT ALLOCATION of
+	-- capacity, not a static configuration -- so a train presently allotted to
+	-- bricks and grain would not list tools even though its line hauls them.
+	--
+	-- Dump all three views per line, plus the per-unit loadConfig that has
+	-- never been opened, and compare against what the game window shows.
+	if settings.debug and not state.probedCaps then
+		state.probedCaps = true
+		log("=========== CAPACITY PROBE ===========")
+		for i = 1, #lines do
+			local okV, vs = pcall(function() return tvs.getLineVehicles(lines[i].id) end)
+			local vids = okV and toTable(vs) or nil
+			if vids and vids[1] then
+				local okE, ve = pcall(game.interface.getEntity, vids[1])
+				if okE and type(ve) == "table" then
+					local function keysOf(t)
+						local out, tt = {}, toTable(t)
+						if type(tt) == "table" then
+							for k, v in pairs(tt) do
+								out[#out + 1] = tostring(k) .. "=" .. tostring(v)
+							end
+							table.sort(out)
+						end
+						return table.concat(out, " ")
+					end
+					log(" line", tostring(lines[i].name), "vehicles=", tostring(#vids))
+					log("   capacities   :", keysOf(ve.capacities))
+					log("   allCapacities:", keysOf(ve.allCapacities))
+					log("   cargoLoad    :", keysOf(ve.cargoLoad))
+					local units = toTable(ve.vehicles)
+					if type(units) == "table" and units[1] then
+						describeShape("   unit[1].loadConfig",
+							toTable(units[1].loadConfig) or units[1].loadConfig, 3)
+					end
+				end
+			end
+		end
+		log("=========== CAPACITY PROBE END ===========")
+	end
+
 
 	-- A line is named ONLY when it is the one line here configured for that
 	-- commodity. With two or more we cannot tell which of them a given waiting

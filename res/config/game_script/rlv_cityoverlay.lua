@@ -60,11 +60,21 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- carrier happened to sort eleventh. Cap rows, never data.
 local MAX_STATION_LINES = 10
 
--- Vehicles sampled per line when working out what that line is configured to
--- carry. This is per VEHICLE (a whole train), and every train on a line is
--- near-always configured identically, so a handful settles it. Four rather
--- than eight because every line is now read, not just the first ten.
-local MAX_LINE_VEHICLES = 4
+-- Safety bound on vehicles read per line, NOT a sample.
+--
+-- An earlier version sampled 4, on the argument that every train on a line is
+-- configured identically. That argument is wrong: a player can replace trains
+-- individually, so a line's fifth train may haul something its first four do
+-- not. Sampling then drops a commodity's only carrier intermittently -- a row
+-- that named its line correctly one minute showed "--" the next.
+--
+-- "Which commodities does this line carry" is a SET question, and sampling a
+-- set gives a lower bound, never an answer. Same mistake as capping
+-- stationLines: a performance limit deciding a data result.
+--
+-- So read them all. This exists only so a pathological line cannot stall the
+-- panel, and it logs when it binds rather than silently truncating.
+local MAX_LINE_VEHICLES = 32
 local MAX_CARGO_SAMPLES = 120 -- sim-cargo items sampled when resolving
                               -- destinations; a busy station holds many
 -- A click this close to a town CENTRE ranks the town first.
@@ -2328,6 +2338,12 @@ local function cargoLineMap(lines)
 			-- per VEHICLE rather than up to MAX_CARGO_SAMPLES per line. Vehicles
 			-- on a line are near-always identically configured, so the first few
 			-- already reveal the full cargo set.
+			if #vids > MAX_LINE_VEHICLES then
+				log("  line", tostring(line.name), "has", tostring(#vids),
+					"vehicles, reading first", tostring(MAX_LINE_VEHICLES),
+					"-- carrier set may be incomplete")
+			end
+
 			for j = 1, math.min(#vids, MAX_LINE_VEHICLES) do
 				local okE, ve = pcall(game.interface.getEntity, vids[j])
 				if okE and type(ve) == "table" then

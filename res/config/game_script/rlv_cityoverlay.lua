@@ -2003,6 +2003,54 @@ local function showIndustryPanel(entityId, entity, mouseX, mouseY)
 		return
 	end
 
+	-- TEMPORARY PROBE: can the panel be kept on screen? Remove with probeVehicles.
+	--
+	-- A clamp needs two numbers neither of which has a proven source:
+	-- the VIEWPORT size, and the panel's OWN size. Ruled out already --
+	-- mainView exposes only getCameraController/getTerrainPos/stopAction,
+	-- gameUI only renderer/view-manager/sound calls, and
+	-- game.gui.getContentRect("townhudicon") returns nil.
+	--
+	-- So try every remaining candidate and NAME the one that works. Runs once.
+	if settings.debug and not state.probedLayout then
+		state.probedLayout = true
+		log("=========== LAYOUT PROBE ===========")
+		log("mouse at", tostring(mouseX), tostring(mouseY))
+
+		-- 1. Does a Component report its own rect? Ask the panel and the root.
+		local root = ensureOverlayRoot()
+		for label, comp in pairs({ panel = panel, root = root }) do
+			if comp then
+				for _, m in ipairs({ "getContentRect", "getRect", "calcMinimumSize",
+						"getSize", "getMinimumSize", "getPosition" }) do
+					local okM, res = pcall(function() return comp[m] and comp[m](comp) end)
+					if okM and res ~= nil then
+						log("  ", label .. ":" .. m .. "()", "->", type(res))
+						describeShape(label .. "." .. m, toTable(res) or res, 2)
+					end
+				end
+				if label == "root" then dumpKeys("root component", comp) end
+			end
+		end
+
+		-- 2. The legacy string form, against names that might BE the viewport.
+		for _, nm in ipairs({ "mainView", "gameUI", "toolTipContainer",
+				"menu.main", "mainMenu", "root" }) do
+			local okR, r = pcall(game.gui.getContentRect, nm)
+			if okR and r ~= nil then
+				log("  getContentRect(", nm, ") ->", type(r))
+				describeShape("rect." .. nm, toTable(r) or r, 2)
+			end
+		end
+
+		-- 3. The host layout itself -- it is a CFloatingLayout, which must know
+		--    its own bounds to place anything.
+		local hostLayout = panelHost()
+		if hostLayout then dumpKeys("host layout", hostLayout) end
+
+		log("=========== LAYOUT PROBE END ===========")
+	end
+
 	local ok, err = pcall(function()
 		host:addItem(panel, api.gui.util.Rect.new(mouseX - 12, mouseY + 14, 0, 0))
 	end)

@@ -2316,10 +2316,11 @@ local function cargoLineMap(lines)
 		end)
 		local vids = okV and toTable(vehicles) or nil
 
-		if not state.loggedCargoLine then
-			log("getLineVehicles(", tostring(line.id), ") ok=", tostring(okV),
-				"raw=", type(vehicles), "converted=",
-				vids and ("n=" .. #vids) or "nil")
+		-- Same reasoning: a first call that finds no vehicles is exactly the
+		-- symptom to catch, so this cannot be gated to one run either.
+		if settings.debug and (vids == nil or #vids == 0) then
+			log("  getLineVehicles(", tostring(line.name), ") EMPTY ok=",
+				tostring(okV), "raw=", type(vehicles))
 		end
 
 		if vids then
@@ -2353,12 +2354,17 @@ local function cargoLineMap(lines)
 	-- (goods delivered for the town, with nothing to take them onward) or a
 	-- gap in the lookup. Dump the whole configured set once so the difference
 	-- is readable rather than argued about.
-	if settings.debug and not state.loggedCarrierSet then
-		state.loggedCarrierSet = true
+	-- EVERY CALL, not once per session. The first panel opened after a save
+	-- reload under-reports -- a commodity showed "--" and the very next click
+	-- named its line correctly. A once-per-session dump captured only one of
+	-- the two clicks, so it could not show what differed. Logging each call
+	-- makes the first and second directly comparable.
+	if settings.debug then
 		local seen = {}
 		for ctype in pairs(carriers) do seen[#seen + 1] = tostring(ctype) end
 		table.sort(seen)
-		log("carrier set: lines here are configured for [",
+		state.carrierCalls = (state.carrierCalls or 0) + 1
+		log("carrier set #" .. tostring(state.carrierCalls), ": [",
 			table.concat(seen, " "), "] across", tostring(#lines), "lines")
 	end
 

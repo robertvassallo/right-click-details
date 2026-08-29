@@ -2777,9 +2777,30 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- directly, and works for passengers as well as freight.
 		-- Muted: throughput is background context, not the thing you opened the
 		-- panel for. Greying it keeps the line rows and the heading dominant.
-		layout:addItem(buildStatRow(_("Outbound/yr"),
+		--
+		-- NOT "/yr". These are LIFETIME totals since the station was built.
+		--
+		-- rateOf prefers _lastYear and _lastMonth, but the engine never fills
+		-- either, so it always falls through to _sum -- which only grows. The
+		-- industry panel made exactly this mistake and was corrected; the
+		-- station labels were missed in that sweep and shipped "/yr" against a
+		-- cumulative figure for several releases. A small branch station read
+		-- "Outbound/yr 378.5K" with one item waiting, which is what gave it
+		-- away.
+		--
+		-- A per-year figure CANNOT be recovered by dividing here. The divisor
+		-- would have to be the station's age and nothing exposes a build date;
+		-- total game time is not a substitute, because a station built late in
+		-- a long game would read an order of magnitude low, and by a different
+		-- factor at every station -- which breaks comparing them at a glance,
+		-- the one thing this panel is for.
+		--
+		-- The real fix is sampling: stash { sum, time } per station and
+		-- difference it on a later view. See PLAN.md section 2, which needs
+		-- this for the low-stock highlight too.
+		layout:addItem(buildStatRow(_("Outbound"),
 			fmtValue(rateOf(entity.itemsLoaded)), "rlvStatMuted", "rlvStatMuted"))
-		layout:addItem(buildStatRow(_("Inbound/yr"),
+		layout:addItem(buildStatRow(_("Inbound"),
 			fmtValue(rateOf(entity.itemsUnloaded)), "rlvStatMuted", "rlvStatMuted"))
 
 		-- Line names now sit on the cargo rows themselves, so no separate list.

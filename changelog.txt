@@ -45,6 +45,25 @@ FIXED
   specifically". They never were. That line is left standing as it
   shipped rather than quietly rewritten, and this entry corrects it.
 
+* Station throughput was labelled per-year and never was. Outbound
+  and Inbound now read as what they are - lifetime totals since the
+  station was built.
+
+  The numbers were always right; only the "/yr" on the label was
+  wrong. The game keeps per-month and per-year counters but never
+  fills them in, so the reading falls back to the running total. The
+  industry panel had the identical fault and was corrected several
+  releases ago - the station labels were missed in that sweep. A
+  branch station reading "Outbound/yr 378.5K" with a single item
+  waiting is what gave it away.
+
+  A real per-year figure cannot be got by dividing what is there:
+  the divisor would have to be the station's age, and nothing
+  exposes a build date. Total game time is not a substitute - a
+  station built late in a long game would read an order of magnitude
+  low, and by a different factor at every station. Getting it right
+  means sampling the total twice and differencing, which is planned.
+
 
 CHANGED
 

@@ -195,7 +195,7 @@ subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
 
 - The panel's percentage is `supply / limit`, not the growth-contribution `%`
   from the town window — that is computed in C++ and not exposed.
-- **Produced / Shipped / Used are LIFETIME totals, not rates.** An earlier
+- **Produced / Shipped / Used, and a station's Outbound / Inbound, are LIFETIME totals, not rates.** An earlier
   version of this file claimed they were trailing-twelve-month figures from the
   entity's `_lastYear` accumulators. That was wrong for three releases: those
   buckets exist in the shape but are **never populated** — both read zero on a
@@ -203,6 +203,10 @@ subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
   and it is cumulative since the industry was built. Labels no longer say
   `/yr`. A real rate needs sampling `_sum` against
   `game.interface.getGameTime().time` and differencing — see PLAN.md §2.
+  The station labels kept saying `/yr` for several releases after the industry
+  ones were corrected, and were only caught in v1.7. Dividing by total game
+  time is not a shortcut: the divisor would have to be the station's age, and
+  nothing exposes a build date.
 - **The low-stock highlight is currently disabled.** It divided stored by
   consumption expecting a rate; against a lifetime total the ratio vanishes and
   every row would flag as a bottleneck. Returns when a rate exists.

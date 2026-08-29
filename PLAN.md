@@ -105,15 +105,11 @@ scope yet and it resolves to a nil global, crashing `guiInit`.
 
 These are the planned direction, ahead of the older blocked items below.
 
-### A. Town details window — formatting pass
+### A. Town details window — formatting pass — SHIPPED in v1.7
 
-The station panel was reworked in v1.6 into an exact highlighted total, a
-line-by-line breakdown with colour chips, and recessive throughput figures. The
-town panel has not had the same treatment and now looks like the odd one out.
-
-Bring it in line: icon-led totals, the same highlight and muted styles, and the
-same column discipline (fixed dot column, right-aligned counts) so numbers stack
-down the panel.
+Brought in line with the station panel: right-aligned figures in a fixed column
+via `rlvLineCount`, recessive percentages via `rlvStatMuted`, and a rule under
+the population line. Left here as a pointer; the detail is in the changelog.
 
 ### B. Town radius — lines and cargo within it
 
@@ -153,6 +149,63 @@ Known constraints, from this mod's own history:
   properties on what already exists.
 
 Feasibility is genuinely unknown; establish that before designing the UI.
+
+### D. Right-click a VEHICLE — opt-in
+
+Not supported today, and not merely unimplemented: a vehicle is never even a
+candidate. `classify` returns nil for anything that is not a town, station,
+depot or sim building, and the three search tiers only ever ASK the engine for
+those types. So a right-click on a moving train falls through to whatever
+station or industry happens to be underneath it.
+
+Wanted, at minimum:
+
+- its line
+- its next stop
+- what it is currently carrying
+
+No buttons. An earlier draft of this item had a button group opening the real
+line- and vehicle-management windows; dropped. It would have rested on
+`util.ViewManager:openWindow`, which this mod has never called, and it needed
+its own dismiss-mode gating to stop the buttons being unreachable under "Mouse
+moves". Neither cost is worth paying for a shortcut to windows the player can
+already reach by left-clicking.
+
+**Ships OFF, behind a settings toggle.** This is the part to get right, and it
+is not just caution — vehicles compete for clicks. `LOCAL_RADIUS` is
+deliberately tight (45) so stations do not steal clicks meant for town labels,
+and a vehicle sitting in a platform sits on top of the station serving it,
+where the station is usually the answer the player wants. A toggle means anyone
+who dislikes that trade simply never sees it, which is a better answer than
+trying to find a ranking rule that suits everyone.
+
+The wiring is an established pattern, not new ground — copy `panelEnabled` /
+`debugLogging`:
+
+- `config.defaultIndex` in `res/scripts/rlv_cityoverlay_config.lua`, index 0
+  for off
+- resolve it in `config.applyParams` as `(params.X == 1)`, alongside
+  `debugLogging`
+- `param_X` / `param_X_tt` strings in `strings.lua`
+- it must survive the settings sync across script contexts — see the v1.5
+  entry in the changelog for why that is not automatic
+
+Then the ranking decision, once it is opt-in: when the toggle is on and a
+vehicle and its station are both under the cursor, which wins, and does the
+existing right-click-again cycling get the player to the other one? Cycling
+already exists, so this is probably "station first, vehicle on the next click"
+rather than a new radius tier.
+
+One unknown, and it blocks design: **what does a VEHICLE entity carry?**
+Nothing in this repo has ever dumped one, so line, next stop and current load
+are all assumptions. `getLineVehicles` is recorded in API-NOTES as yielding
+nothing usable, but that was the line-to-vehicles direction while hunting
+passenger attribution; vehicle-to-line is the reverse and may differ. Settle it
+with one debug pass, then design.
+
+Do NOT build the panel against assumed field meanings. v1.6's per-line freight
+rows and the "cargo YES" note in API-NOTES were both exactly that mistake, and
+both shipped broken.
 
 ---
 

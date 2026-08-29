@@ -188,8 +188,9 @@ all against a live save:
     STATION component           returns nil on the group AND its members, so its
                                 documented terminals/personNodes are unreachable
     subtraction (onLine - riders)
-                                getLineVehicles yields nothing usable from
-                                lineSystem or game.interface
+                                CORRECTED -- see "Vehicles" below. getLineVehicles
+                                was looked for on lineSystem, which does not have
+                                it; it lives on transportVehicleSystem and works
 
 So passenger figures can only ever be route-wide, and waiting freight can only be
 reported per commodity for the station as a whole. That is what the mod ships as
@@ -198,6 +199,55 @@ of v1.7.
 Two measurement mistakes wasted a lot of time here and are worth avoiding:
 passing a station id where a network entity was wanted, and calling `#t` on a
 return documented as a key-value map.
+
+### Vehicles -- richer than anything else in this API
+
+`transportVehicleSystem` owns them. Confirmed function list on a live save:
+
+    getDepotVehicles          getGoingToDepotVehicles   getInfo
+    getLine2VehicleMap        getLineStopVehicles       getLineVehicles
+    getNoPathVehicles         getVehicleNames           getVehicles
+    getVehiclesWithState
+
+**`getLineVehicles` works.** An earlier note here called it useless -- it had
+been looked for on `lineSystem`, which has no such function. Third measurement
+error of the same kind in this file, after `#` on a key-value map and passing a
+station id where a network entity was wanted. Check WHICH SYSTEM before
+concluding a call is dead.
+
+`getEntity(vehicleId)` returns 14 keys, and they are the good ones:
+
+    id           39547
+    name         "Medium Rare"
+    type         "VEHICLE"
+    carrier      "RAIL"
+    state        "EN_ROUTE"        -- already a readable string
+    line         35910             -- the line entity id
+    stopIndex    2                 -- index into getLineStops(line)
+    depot        -1                -- -1 when not assigned/in one
+    position     { x, y, z }
+    speed        22.45
+    cargoLoad    { PLANKS = 129 }              -- what it is carrying NOW
+    capacities   { LOGS = 143, PLANKS = 130 }  -- what it is CONFIGURED for
+    allCapacities{ LOGS = 273, PLANKS = 273, STEEL = 273,
+                   CONSTRUCTION_MATERIALS = 273 }  -- what it COULD be set to
+    vehicles     per-unit consist: fileName, condition, purchaseTime,
+                 loadConfig, color, reversed, logo
+
+**`capacities` is the fix for per-line cargo attribution.** It is what the
+vehicle is configured to carry and does not change when the train runs empty,
+unlike `getSimCargosForLine`, which reports only what is aboard at that instant
+and returns n=0 for most lines most of the time. Line -> getLineVehicles ->
+each vehicle's `capacities` keys gives a STABLE set of commodities a line
+carries. That is what the panel should have been using.
+
+The TRANSPORT_VEHICLE component adds little over `getEntity`: `.line`, `.state`
+(an integer rather than the friendly string), `.config` (opaque userdata),
+`.userStopped`, `.depot`, `.doorsTime`. Vehicles have **no COLOR component**
+(`ok=true, type=nil`), so vehicle colour lives in `vehicles[n].color`.
+
+`getDepotVehicles` is the only route to a useful depot panel -- the depot
+entity itself is two strings, see Entity shapes.
 
 ### Opening an entity's window
 

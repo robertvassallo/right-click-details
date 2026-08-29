@@ -2465,34 +2465,22 @@ local function cargoLineMap(lines)
 	end
 
 	state.loggedCargoLine = true
-	-- TEMPORARY PROBE: can waiting cargo be tied to a line at all?
+	-- TEMPORARY PROBE round 2: the terminal calls want a CARGO TYPE.
 	--
-	-- The vehicle route is now MEASURED DEAD. loadConfig is { -1 } (auto) on
-	-- every vehicle, so there is no static per-line cargo configuration to
-	-- read; `capacities` is only the current auto-assignment (Ludlow Transfer
-	-- read TOOLS=32 while carrying 10) and `allCapacities` is what the wagon
-	-- type can physically hold -- all 16 cargo types for a boxcar. One
-	-- under-reports and churns, the other is true and useless.
+	-- Round 1 listed the surface -- getCount, getEntity, getMaxCount, getPlace,
+	-- hasFreePlaces, supportsCargoType -- and every get* returned nil for
+	-- (id) and (id, terminal). Only getMaxCount(stationId, terminal) works, and
+	-- the mod already uses it. The names say what is missing: supportsCargoType
+	-- and getCount plainly take a cargo type, so the earlier calls were simply
+	-- one argument short. Not a dead system, an incomplete call -- the sixth
+	-- time that has been the answer in this file.
 	--
-	-- But the game's own station window DOES group waiting cargo by line, so
-	-- the association exists. simCargoAtTerminalSystem is the likeliest holder
-	-- and is already reachable: getMaxCount(stationId, terminal) is called for
-	-- the capacity figure, with a STATION id -- despite API-NOTES claiming that
-	-- system needs a transport-network entity. Its full surface has never been
-	-- listed.
+	-- Cargo types are 1-based numeric ids (see the cargo registry).
 	if settings.debug and not state.probedTerminalCargo then
 		state.probedTerminalCargo = true
-		log("=========== TERMINAL CARGO PROBE ===========")
+		log("=========== TERMINAL CARGO PROBE 2 ===========")
 		local scat = api.engine.system.simCargoAtTerminalSystem
 		if scat then
-			local fns = {}
-			pcall(function() for k in pairs(scat) do fns[#fns + 1] = tostring(k) end end)
-			table.sort(fns)
-			log(" simCargoAtTerminalSystem:", table.concat(fns, " "))
-
-			-- Every id we can name, against every terminal index, for each
-			-- function taking (id) or (id, terminal). Named, capped, errors
-			-- reported -- a swallowed error is what hid the settings bug.
 			local ids = { stationId }
 			local mem = entity and toTable(entity.stations)
 			if mem then
@@ -2501,38 +2489,46 @@ local function cargoLineMap(lines)
 				end
 			end
 
-			for _, fname in ipairs(fns) do
-				if fname:sub(1, 3) == "get" and fname ~= "getMaxCount" then
-					for _, sid in ipairs(ids) do
-						for term = 0, 2 do
-							local ok, res = pcall(function()
-								return scat[fname](sid, term)
-							end)
-							if ok and res ~= nil then
-								local t = toTable(res)
-								log("  ", fname .. "(" .. tostring(sid) .. "," ..
-									tostring(term) .. ") ->", type(res),
-									"n=", t and tostring(#t) or "?")
-								if t and next(t) ~= nil then
-									describeShape(fname, t, 3)
+			local hits = 0
+			for _, sid in ipairs(ids) do
+				for term = 0, 3 do
+					for ct = 1, 18 do
+						-- getCount(station, terminal, cargoType)
+						local okC, n = pcall(function() return scat.getCount(sid, term, ct) end)
+						if okC and type(n) == "number" and n > 0 then
+							hits = hits + 1
+							log("  getCount(", tostring(sid), term, ct, ") =", tostring(n))
+
+							-- Something is here, so ask what it IS. If a waiting
+							-- item names a line, this is where it shows up.
+							for idx = 0, 1 do
+								local okE, e = pcall(function()
+									return scat.getEntity(sid, term, ct, idx)
+								end)
+								if okE and e ~= nil then
+									log("    getEntity(..,", idx, ") ->", type(e), tostring(e))
+									if type(e) == "number" then
+										local okG, ent = pcall(game.interface.getEntity, e)
+										if okG and type(ent) == "table" then
+											describeShape("    waitingCargo", ent, 3)
+										end
+									end
 								end
 							end
-						end
-						-- and the single-argument form
-						local ok1, res1 = pcall(function() return scat[fname](sid) end)
-						if ok1 and res1 ~= nil then
-							local t1 = toTable(res1)
-							log("  ", fname .. "(" .. tostring(sid) .. ") ->",
-								type(res1), "n=", t1 and tostring(#t1) or "?")
-							if t1 and next(t1) ~= nil then describeShape(fname, t1, 3) end
+							local okP, pl = pcall(function() return scat.getPlace(sid, term, ct) end)
+							if okP and pl ~= nil then
+								log("    getPlace ->", type(pl), tostring(pl))
+							end
 						end
 					end
 				end
 			end
-		else
-			log(" simCargoAtTerminalSystem MISSING")
+			log("  non-zero getCount hits:", tostring(hits))
+			if hits == 0 then
+				log("  !! nothing found -- try a different argument order")
+			end
 		end
-		log("=========== TERMINAL CARGO PROBE END ===========")
+		log("=========== TERMINAL CARGO PROBE 2 END ===========")
 	end
 
 	-- A line is named ONLY when it is the one line here configured for that

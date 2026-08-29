@@ -2444,7 +2444,21 @@ end
 -- quantised grid (6 levels per channel, index r*36 + g*6 + b) and this snaps to
 -- the nearest.
 local function buildLineDot(color)
-	local dot = api.gui.comp.TextView.new("\226\151\143")  -- U+25CF BLACK CIRCLE
+	-- FILLED for a known line, HOLLOW for an unknown one.
+	--
+	-- The neutral marker used to be a filled disc in a blue-grey, which reads
+	-- as "some line whose colour happens to be grey" -- and that is not a
+	-- hypothetical: a real save had lines at rgb 153,153,153 and 178,178,178
+	-- sitting directly above a "3 lines" row, both rendering as the same grey
+	-- disc while meaning completely different things.
+	--
+	-- Shading cannot fix this. Any shade picked for "unknown" is a shade some
+	-- line is allowed to be, so the collision just moves. A hollow ring is a
+	-- different SHAPE, so it cannot be mistaken for a colour no matter what
+	-- the player picks -- and "empty" reads as "nothing known" on its own.
+	local glyph = color and "\226\151\143"   -- U+25CF BLACK CIRCLE
+	                    or "\226\151\139"   -- U+25CB WHITE CIRCLE (hollow)
+	local dot = api.gui.comp.TextView.new(glyph)
 
 	if color then
 		local function level(v)

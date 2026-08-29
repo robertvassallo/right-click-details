@@ -185,8 +185,12 @@ all against a live save:
                                 tnEntity: not the station group, its members,
                                 their constructions, nor
                                 getEntities{type="TRANSPORT_NETWORK"}
-    STATION component           returns nil on the group AND its members, so its
-                                documented terminals/personNodes are unreachable
+    STATION component           CORRECTED -- nil on the station GROUP, but it
+                                READS on the member station. getComponent(member,
+                                ComponentType.STATION).terminals returns a list
+                                of StationTerminal userdata (8 at one station, 4
+                                at another). The claim that it was unreachable
+                                blocked per-stop attribution from v1.6 onward
     subtraction (onLine - riders)
                                 CORRECTED -- see "Vehicles" below. getLineVehicles
                                 was looked for on lineSystem, which does not have

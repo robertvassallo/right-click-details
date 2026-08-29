@@ -410,9 +410,20 @@ Still outstanding:
 
 ## Iterating
 
-Stylesheets and textures are read **once per process** — visual changes need a
-full restart, a save reload is not enough. Game-script changes come back on a
-save reload.
+**Everything is read once per process — game scripts included.** Stylesheets,
+textures AND `res/config/game_script/*.lua` all need a full game restart. A save
+reload is not enough for any of them.
+
+This file previously claimed game-script changes came back on a save reload.
+They do not, and the mistake is expensive: a stale session runs the previous
+code while the new file sits in staging, and its log is indistinguishable from a
+real result. Four rounds were lost to it in one session — probe output read as
+"the API returns nothing" when the probe had never run.
+
+`guiInit` logs `build: <BUILD_STAMP>` (see the constant near the top of the game
+script). Bump it on each development deploy and check the log for it BEFORE
+trusting anything else in there. `init #1` on every load is not evidence the new
+code loaded — the Lua state is fresh either way.
 
 `print()` output lands in:
 

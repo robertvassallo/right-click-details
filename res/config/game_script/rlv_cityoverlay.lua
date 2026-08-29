@@ -2465,55 +2465,75 @@ local function cargoLineMap(lines)
 	end
 
 	state.loggedCargoLine = true
-	-- TEMPORARY PROBE: why does a line the game credits with a commodity not
-	-- appear as its carrier? Remove before v1.8.
+	-- TEMPORARY PROBE: can waiting cargo be tied to a line at all?
 	--
-	-- Whitnash West showed "--" for tools while the game's own station window
-	-- listed Whitnash Transfer carrying 22 of them, and got bricks and grain on
-	-- the same line right.
+	-- The vehicle route is now MEASURED DEAD. loadConfig is { -1 } (auto) on
+	-- every vehicle, so there is no static per-line cargo configuration to
+	-- read; `capacities` is only the current auto-assignment (Ludlow Transfer
+	-- read TOOLS=32 while carrying 10) and `allCapacities` is what the wagon
+	-- type can physically hold -- all 16 cargo types for a boxcar. One
+	-- under-reports and churns, the other is true and useless.
 	--
-	-- Suspicion, from the vehicle probe's own numbers: `capacities` summed to
-	-- the vehicle total (143 + 130 = 273) while `allCapacities` reported 273
-	-- for each of four types. That makes capacities the CURRENT ALLOCATION of
-	-- capacity, not a static configuration -- so a train presently allotted to
-	-- bricks and grain would not list tools even though its line hauls them.
-	--
-	-- Dump all three views per line, plus the per-unit loadConfig that has
-	-- never been opened, and compare against what the game window shows.
-	if settings.debug and not state.probedCaps then
-		state.probedCaps = true
-		log("=========== CAPACITY PROBE ===========")
-		for i = 1, #lines do
-			local okV, vs = pcall(function() return tvs.getLineVehicles(lines[i].id) end)
-			local vids = okV and toTable(vs) or nil
-			if vids and vids[1] then
-				local okE, ve = pcall(game.interface.getEntity, vids[1])
-				if okE and type(ve) == "table" then
-					local function keysOf(t)
-						local out, tt = {}, toTable(t)
-						if type(tt) == "table" then
-							for k, v in pairs(tt) do
-								out[#out + 1] = tostring(k) .. "=" .. tostring(v)
+	-- But the game's own station window DOES group waiting cargo by line, so
+	-- the association exists. simCargoAtTerminalSystem is the likeliest holder
+	-- and is already reachable: getMaxCount(stationId, terminal) is called for
+	-- the capacity figure, with a STATION id -- despite API-NOTES claiming that
+	-- system needs a transport-network entity. Its full surface has never been
+	-- listed.
+	if settings.debug and not state.probedTerminalCargo then
+		state.probedTerminalCargo = true
+		log("=========== TERMINAL CARGO PROBE ===========")
+		local scat = api.engine.system.simCargoAtTerminalSystem
+		if scat then
+			local fns = {}
+			pcall(function() for k in pairs(scat) do fns[#fns + 1] = tostring(k) end end)
+			table.sort(fns)
+			log(" simCargoAtTerminalSystem:", table.concat(fns, " "))
+
+			-- Every id we can name, against every terminal index, for each
+			-- function taking (id) or (id, terminal). Named, capped, errors
+			-- reported -- a swallowed error is what hid the settings bug.
+			local ids = { stationId }
+			local mem = entity and toTable(entity.stations)
+			if mem then
+				for _, m in pairs(mem) do
+					if type(m) == "number" then ids[#ids + 1] = m end
+				end
+			end
+
+			for _, fname in ipairs(fns) do
+				if fname:sub(1, 3) == "get" and fname ~= "getMaxCount" then
+					for _, sid in ipairs(ids) do
+						for term = 0, 2 do
+							local ok, res = pcall(function()
+								return scat[fname](sid, term)
+							end)
+							if ok and res ~= nil then
+								local t = toTable(res)
+								log("  ", fname .. "(" .. tostring(sid) .. "," ..
+									tostring(term) .. ") ->", type(res),
+									"n=", t and tostring(#t) or "?")
+								if t and next(t) ~= nil then
+									describeShape(fname, t, 3)
+								end
 							end
-							table.sort(out)
 						end
-						return table.concat(out, " ")
-					end
-					log(" line", tostring(lines[i].name), "vehicles=", tostring(#vids))
-					log("   capacities   :", keysOf(ve.capacities))
-					log("   allCapacities:", keysOf(ve.allCapacities))
-					log("   cargoLoad    :", keysOf(ve.cargoLoad))
-					local units = toTable(ve.vehicles)
-					if type(units) == "table" and units[1] then
-						describeShape("   unit[1].loadConfig",
-							toTable(units[1].loadConfig) or units[1].loadConfig, 3)
+						-- and the single-argument form
+						local ok1, res1 = pcall(function() return scat[fname](sid) end)
+						if ok1 and res1 ~= nil then
+							local t1 = toTable(res1)
+							log("  ", fname .. "(" .. tostring(sid) .. ") ->",
+								type(res1), "n=", t1 and tostring(#t1) or "?")
+							if t1 and next(t1) ~= nil then describeShape(fname, t1, 3) end
+						end
 					end
 				end
 			end
+		else
+			log(" simCargoAtTerminalSystem MISSING")
 		end
-		log("=========== CAPACITY PROBE END ===========")
+		log("=========== TERMINAL CARGO PROBE END ===========")
 	end
-
 
 	-- A line is named ONLY when it is the one line here configured for that
 	-- commodity. With two or more we cannot tell which of them a given waiting

@@ -2476,9 +2476,14 @@ local function cargoLineMap(lines)
 	-- time that has been the answer in this file.
 	--
 	-- Cargo types are 1-based numeric ids (see the cargo registry).
+	-- RETIRES ONLY ON SUCCESS, so it probes whichever station you actually
+	-- care about rather than whichever you happened to click first. A one-shot
+	-- flag set up front is precisely the mistake the v1.7 probe made -- it
+	-- landed on a freight station, produced nothing, and marked itself done for
+	-- the session.
 	if settings.debug and not state.probedTerminalCargo then
-		state.probedTerminalCargo = true
 		log("=========== TERMINAL CARGO PROBE 2 ===========")
+		log("  station:", tostring(entity and entity.name), "id=", tostring(stationId))
 		local scat = api.engine.system.simCargoAtTerminalSystem
 		if scat then
 			local ids = { stationId }
@@ -2524,8 +2529,12 @@ local function cargoLineMap(lines)
 				end
 			end
 			log("  non-zero getCount hits:", tostring(hits))
-			if hits == 0 then
-				log("  !! nothing found -- try a different argument order")
+			if hits > 0 then
+				-- Only now is the question answered; leave it armed otherwise
+				-- so the next station gets its turn.
+				state.probedTerminalCargo = true
+			else
+				log("  !! nothing found here -- staying armed for the next station")
 			end
 		end
 		log("=========== TERMINAL CARGO PROBE 2 END ===========")

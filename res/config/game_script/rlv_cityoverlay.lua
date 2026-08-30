@@ -55,29 +55,14 @@ local MAX_CANDIDATES  = 400   -- hard cap per query, so a dense area cannot stal
 -- glance and becomes a window, which is the thing this mod exists to avoid.
 --
 -- APPLIED AT THE DISPLAY, NEVER TO THE LOOKUP. It used to trim stationLines
--- itself, which meant a cosmetic limit decided what cargoLineMap could see --
--- and a station with 12 line stops reported "--" for commodities whose only
+-- itself, which meant a cosmetic limit decided what the cargo lookup could
+-- see -- a station with 12 line stops reported "--" for commodities whose only
 -- carrier happened to sort eleventh. Cap rows, never data.
 -- See guiInit; bumped on each development deploy.
-local BUILD_STAMP = "r5-cargo-on-member"
+local BUILD_STAMP = "branch:freight-lines-section"
 
 local MAX_STATION_LINES = 10
 
--- Safety bound on vehicles read per line, NOT a sample.
---
--- An earlier version sampled 4, on the argument that every train on a line is
--- configured identically. That argument is wrong: a player can replace trains
--- individually, so a line's fifth train may haul something its first four do
--- not. Sampling then drops a commodity's only carrier intermittently -- a row
--- that named its line correctly one minute showed "--" the next.
---
--- "Which commodities does this line carry" is a SET question, and sampling a
--- set gives a lower bound, never an answer. Same mistake as capping
--- stationLines: a performance limit deciding a data result.
---
--- So read them all. This exists only so a pathological line cannot stall the
--- panel, and it logs when it binds rather than silently truncating.
-local MAX_LINE_VEHICLES = 32
 local MAX_CARGO_SAMPLES = 120 -- sim-cargo items sampled when resolving
                               -- destinations; a busy station holds many
 -- A click this close to a town CENTRE ranks the town first.
@@ -2293,17 +2278,14 @@ local function stationLines(stationId, entity)
 	-- happen below -- so a line calling twice burned two slots for one row, and
 	-- a station could show well under ten lines while the log claimed ten.
 	--
-	-- Second and much worse, cargoLineMap is built from this list, so a
-	-- cosmetic limit was silently corrupting DATA. Found on a real save:
-	-- Spalding North has 12 line stops, Towcester Delivery fell outside the
-	-- first ten, and it was the only line carrying two of the commodities
-	-- waiting there. The panel dropped the line and then reported "--", exactly
-	-- as though nothing carried them. The game's own station window listed it
-	-- the whole time.
+	-- Second, a cosmetic limit was silently corrupting DATA: the cargo
+	-- attribution was built from this list, so a station with 12 line stops
+	-- reported "--" for commodities whose only carrier sorted eleventh, exactly
+	-- as though nothing carried them. That attribution has since been removed
+	-- as unobtainable, but the rule it taught stands.
 	--
-	-- Callers cap their own OUTPUT instead, after ranking, so what gets dropped
-	-- is the quietest rows rather than whichever line the engine happened to
-	-- return eleventh.
+	-- Callers cap their own OUTPUT instead, so what gets dropped is the
+	-- quietest rows rather than whichever line the engine returned eleventh.
 	if #lineIds > MAX_STATION_LINES then
 		log("stationLines: station has", tostring(#lineIds),
 			"line stops; reading all, display caps at", tostring(MAX_STATION_LINES))
@@ -2343,161 +2325,6 @@ local function stationLines(stationId, entity)
 	return out
 end
 
---- Map cargo type -> the lines at this station configured to carry it.
---
--- Built by asking each line serving this station what its VEHICLES ARE SET UP
--- to haul (transportVehicleSystem.getLineVehicles, then each vehicle's
--- `capacities`). That set does not move when a train happens to be empty.
---
--- It replaced a walk over what each line was HOLDING at that instant, which
--- churned badly: empty is the normal state for a line, so carriers appeared
--- and vanished between clicks and commodities nobody was hauling right then
--- showed no line at all.
---
--- STILL NOT PER-ITEM ATTRIBUTION. Which line a given waiting crate is queued
--- for is not recorded anywhere -- see API-NOTES. This answers the weaker but
--- well-defined question "which lines here handle this commodity", and the
--- panel says so by naming a line only when exactly one does.
---
--- The panel falls back to a hollow ring and "--" per row when nothing
--- resolves, so the amounts stay correct regardless.
-local function cargoLineMap(lines)
-	local map = {}
-	-- cargoType -> { [lineId] = lineName } for every line seen carrying it.
-	local carriers = {}
-	local sys = api and api.engine and api.engine.system
-	local sps = sys and sys.simPersonSystem
-
-	-- PASSENGERS ARE NOT CARGO.
-	--
-	-- A passenger station showed "PASSENGERS -> --" because
-	-- getSimCargosForLine only covers freight; people are sim PERSONS, tracked
-	-- by simPersonSystem, which exposes the mirror call getSimPersonsForLine.
-	--
-	-- Ask both per line: whichever returns entries tells us that line carries
-	-- that traffic. Passengers get attributed directly, since a person on a
-	-- line is a passenger by definition and needs no per-entity type lookup.
-	if sps and sps.getSimPersonsForLine then
-		for i = 1, #lines do
-			local line = lines[i]
-			local ok, people = pcall(function()
-				return sps.getSimPersonsForLine(line.id)
-			end)
-			local conv = ok and toTable(people) or nil
-			if not state.loggedPersonLine then
-				state.loggedPersonLine = true
-				log("getSimPersonsForLine(", tostring(line.id), ") ok=", tostring(ok),
-					"raw=", type(people), "converted=", conv and ("n=" .. #conv) or "nil")
-			end
-			if conv and #conv > 0 and not map.PASSENGERS then
-				map.PASSENGERS = { name = line.name, id = line.id }
-			end
-		end
-	end
-
-	-- WHAT EACH LINE IS CONFIGURED TO CARRY, not what it happens to hold.
-	--
-	-- This used to walk getSimCargosForLine -- the cargo currently ABOARD each
-	-- line -- and treat whatever it found as the carrier set. That fails badly
-	-- for a reason only a busy save makes obvious: a line with nothing loaded
-	-- right now contributes nothing, and empty is the NORMAL state. Measured:
-	-- six of eight lines returned n=0. So the set churned, a station read
-	-- "2 lines" one minute and a single confident name the next, and
-	-- commodities nobody happened to be hauling showed "--" with no line at
-	-- all.
-	--
-	-- A vehicle's `capacities` answers the stable question instead: what this
-	-- vehicle is SET UP to haul. It does not change when a train runs empty.
-	-- Line -> getLineVehicles -> each vehicle's capacities keys therefore gives
-	-- a carrier set that holds still.
-	--
-	-- NOT `allCapacities`. That is what a vehicle COULD be reconfigured to
-	-- carry -- the probe saw a logs-and-planks train reporting STEEL and
-	-- CONSTRUCTION_MATERIALS there too. It would name lines that have never
-	-- touched the commodity.
-	--
-	-- getLineVehicles lives on transportVehicleSystem. API-NOTES spent three
-	-- releases calling it useless because it was looked for on lineSystem,
-	-- which has no such function.
-	local tvs = sys and sys.transportVehicleSystem
-	if not (tvs and tvs.getLineVehicles) then return map end
-
-	for i = 1, #lines do
-		local line = lines[i]
-		local okV, vehicles = pcall(function()
-			return tvs.getLineVehicles(line.id)
-		end)
-		local vids = okV and toTable(vehicles) or nil
-
-		-- One-shot, like the other lookup traces: enough to show the route is
-		-- alive in a bug report without narrating every click.
-		if not state.loggedCargoLine then
-			log("getLineVehicles(", tostring(line.id), ") ok=", tostring(okV),
-				"raw=", type(vehicles), "converted=",
-				vids and ("n=" .. #vids) or "nil")
-		end
-
-		if vids then
-			-- Capped, though far cheaper than what it replaces: one getEntity
-			-- per VEHICLE rather than up to MAX_CARGO_SAMPLES per line. Vehicles
-			-- on a line are near-always identically configured, so the first few
-			-- already reveal the full cargo set.
-			if #vids > MAX_LINE_VEHICLES then
-				log("  line", tostring(line.name), "has", tostring(#vids),
-					"vehicles, reading first", tostring(MAX_LINE_VEHICLES),
-					"-- carrier set may be incomplete")
-			end
-
-			for j = 1, math.min(#vids, MAX_LINE_VEHICLES) do
-				local okE, ve = pcall(game.interface.getEntity, vids[j])
-				if okE and type(ve) == "table" then
-					local caps = toTable(ve.capacities)
-					if type(caps) == "table" then
-						for ctype, amount in pairs(caps) do
-							-- A zero capacity is a slot the vehicle does not
-							-- actually offer; only positive numbers count.
-							if type(amount) == "number" and amount > 0 then
-								carriers[ctype] = carriers[ctype] or {}
-								carriers[ctype][line.id] = line.name
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-
-	state.loggedCargoLine = true
-	-- A line is named ONLY when it is the one line here configured for that
-	-- commodity. With two or more we cannot tell which of them a given waiting
-	-- item belongs to -- nothing records that -- so the row says "N lines" and
-	-- lists them rather than guessing.
-	for ctype, byLine in pairs(carriers) do
-		local all = {}
-		for lid, lname in pairs(byLine) do
-			all[#all + 1] = { id = lid, name = lname }
-		end
-		table.sort(all, function(a, b)
-			return tostring(a.name) < tostring(b.name)
-		end)
-
-		-- KEEP THE WHOLE LIST.
-		--
-		-- Which line a given waiting item is queued for is not recorded, so a
-		-- single confident label would be a guess. But WHICH LINES HANDLE THIS
-		-- COMMODITY HERE is a set question with a real answer, and now a stable
-		-- one. Naming them all is both honest and more useful than naming one
-		-- and hiding the rest.
-		map[ctype] = {
-			name  = all[1] and all[1].name or nil,   -- sole carrier, when n == 1
-			id    = all[1] and all[1].id or nil,
-			lines = all,
-			count = #all,
-		}
-	end
-
-	return map
-end
 
 --- A line's colour as { r, g, b } in 0-255, or nil.
 --
@@ -2743,46 +2570,38 @@ end
 -- API-NOTES.md, and the instrument itself is parked in
 -- tools/probe_terminal_pax.lua should a future patch make this worth retesting.
 
---- One waiting-cargo line: icon, amount, and where it is headed.
--- `dest` is { name, id } from cargoLineMap, or nil when no line could be
--- attributed. The id is what makes the coloured disc possible.
---- Sub-rows naming every line that carries a commodity at this stop.
---
--- Returns a list of components, empty when a single line carries it (that case
--- is already named inline on the commodity row itself).
---
--- No count on these rows, deliberately: the amount belongs to the commodity as
--- a whole and splitting it per line is exactly the attribution the game does
--- not expose. These rows answer "which lines handle this here", nothing more.
-local function buildCargoLineList(dest)
-	local out = {}
-	if not (dest and dest.lines and #dest.lines > 1) then return out end
+--- A section heading inside the panel, e.g. "Lines".
+local function buildLabelRow(text)
+	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+	local tv = api.gui.comp.TextView.new(tostring(text))
+	tv:setStyleClassList({ "rlvStatMuted" })
+	layout:addItem(tv)
 
-	-- Same display cap. A commodity with more than ten carriers at one stop is
-	-- unlikely, but the count on the row above still reports the true total, so
-	-- a trimmed list cannot masquerade as a complete one.
-	for i = 1, math.min(#dest.lines, MAX_STATION_LINES) do
-		local ln = dest.lines[i]
-		local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
-
-		-- Indent under the commodity row it belongs to.
-		local pad = api.gui.comp.TextView.new("   ")
-		layout:addItem(pad)
-
-		layout:addItem(buildLineDot(lineColor(ln.id)))
-
-		local name = api.gui.comp.TextView.new(tostring(ln.name or "?"))
-		name:setStyleClassList({ "rlvDest" })
-		layout:addItem(name)
-
-		local comp = api.gui.comp.Component.new(ROW_NAME)
-		comp:setLayout(layout)
-		out[#out + 1] = comp
-	end
-	return out
+	local comp = api.gui.comp.Component.new(ROW_NAME)
+	comp:setLayout(layout)
+	return comp
 end
 
-local function buildStationCargoRow(cargoId, amount, dest)
+--- One line serving this station: its colour disc and its name.
+--
+-- No count and no cargo. Both were tried and neither survives contact with the
+-- API -- a per-line freight figure is not obtainable, and inventing one is what
+-- this branch exists to stop doing. This row claims only that the line stops
+-- here, which is true.
+local function buildLineNameRow(line)
+	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
+	layout:addItem(buildLineDot(lineColor(line.id)))
+
+	local name = api.gui.comp.TextView.new(tostring(line.name or "?"))
+	name:setStyleClassList({ "rlvDest" })
+	layout:addItem(name)
+
+	local comp = api.gui.comp.Component.new(ROW_NAME)
+	comp:setLayout(layout)
+	return comp
+end
+
+local function buildStationCargoRow(cargoId, amount)
 	local layout = api.gui.layout.BoxLayout.new("HORIZONTAL")
 
 	local okIcon = pcall(function()
@@ -2796,34 +2615,19 @@ local function buildStationCargoRow(cargoId, amount, dest)
 	amt:setStyleClassList({ "rlvStatValue" })
 	layout:addItem(amt)
 
-	-- A LINE-COLOURED DISC, not an arrow.
+	-- NO LINE, and no disc standing in for one.
 	--
-	-- The arrow said "headed for", which the disc says just as well while also
-	-- identifying WHICH line at a glance -- and it matches the passenger rows,
-	-- so both halves of the panel use one visual language for "this line".
-	-- No colour when the carrier is ambiguous: a coloured disc would point at
-	-- one specific line, which is exactly the claim we cannot make.
-	layout:addItem(buildLineDot(
-		(dest and dest.id and (dest.count or 1) == 1) and lineColor(dest.id) or nil))
-
-	local label, cls
-	if dest and dest.count and dest.count > 1 then
-		-- The commodity row itself stays neutral; the lines are listed beneath
-		-- it by buildCargoLineList, one per row, so a stop served by four
-		-- liquid lines reads as four lines rather than "4 lines".
-		label = tostring(dest.count) .. " " .. _("lines")
-		cls   = "rlvStatMuted"
-	elseif dest and dest.name then
-		label = tostring(dest.name)
-		cls   = "rlvDest"
-	else
-		label = "--"
-		cls   = "rlvDest"
-	end
-
-	local nameText = api.gui.comp.TextView.new(label)
-	nameText:setStyleClassList({ cls })
-	layout:addItem(nameText)
+	-- This row used to carry the line carrying the commodity, or "N lines", or
+	-- "--". All three were guesses dressed as facts: the association between a
+	-- waiting item and a line is not obtainable, and every route to it has been
+	-- probed and explained (see API-NOTES). The version that inferred it from
+	-- vehicle capacity was right most of the time and silently wrong the rest,
+	-- which is worse than saying nothing -- a player had no way to tell the
+	-- cases apart.
+	--
+	-- The amount IS exact. Leaving the row at icon-and-number keeps everything
+	-- on it true, and the station's lines are listed separately below, which is
+	-- a question with a stable answer.
 
 	local comp = api.gui.comp.Component.new(ROW_NAME)
 	comp:setLayout(layout)
@@ -2887,89 +2691,6 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 		-- per-cargo destination lookup, which could not be made to work
 		-- (getSimCargosForSource errors on a station group).
 		local lines = stationLines(entityId, entity)
-		local byCargo = cargoLineMap(lines)
-
-		-- TEMPORARY PROBE round 5: ask the MEMBER station for its cargo.
-		--
-		-- Round 4 closed the terminal route: a StationTerminal carries `tag`,
-		-- `personNodes` and `personEdges` and NOTHING about cargo, which is why
-		-- simCargoAtTerminalSystem finds nothing however it is keyed.
-		--
-		-- But it also generalised something. The STATION component is nil on
-		-- the station GROUP and reads on the MEMBER. This file records
-		-- getSimCargosForSource as a "CONFIRMED FAILURE" -- and the note says
-		-- it errored "on a station group". It was never tried on a member.
-		--
-		-- Same shape as six other wrong conclusions here: one call form failing
-		-- taken as the call being dead. If waiting cargo entities come back,
-		-- each can be asked directly what it is and where it is going, which is
-		-- the attribution this feature has been inferring badly for two
-		-- releases.
-		if settings.debug and not state.probedTerminalCargo then
-			log("=========== CARGO ON MEMBER PROBE ===========")
-			log("  station:", tostring(entity and entity.name), "id=", tostring(entityId))
-
-			local scs = api.engine.system.simCargoSystem
-			local ct  = api and api.type and api.type.ComponentType
-
-			local ids = {}
-			local mem = entity and toTable(entity.stations)
-			if mem then
-				for _, m in pairs(mem) do
-					if type(m) == "number" then ids[#ids + 1] = m end
-				end
-			end
-			ids[#ids + 1] = entityId   -- group last, so a member wins first
-
-			for _, sid in ipairs(ids) do
-				local ok, res = pcall(function()
-					return scs.getSimCargosForSource(sid)
-				end)
-				if not ok then
-					log("  getSimCargosForSource(", tostring(sid), ") ERRORED:",
-						tostring(res))
-				else
-					local t = toTable(res)
-					log("  getSimCargosForSource(", tostring(sid), ") ->", type(res),
-						"n=", t and tostring(#t) or "?")
-					if t and t[1] then
-						state.probedTerminalCargo = true
-						-- What IS a waiting item? Resolve, then ask its
-						-- components -- SIM_CARGO_AT_TERMINAL is the one that
-						-- might name a line or terminal.
-						for k = 1, math.min(#t, 3) do
-							local okE, ce = pcall(game.interface.getEntity, t[k])
-							if okE and type(ce) == "table" then
-								describeShape("    waiting[" .. k .. "]", ce, 3)
-							end
-							for _, cname in ipairs({ "SIM_CARGO", "SIM_CARGO_AT_TERMINAL" }) do
-								if ct and ct[cname] then
-									local okC, comp = pcall(api.engine.getComponent,
-										t[k], ct[cname])
-									if okC and comp then
-										log("    ", cname, "on", tostring(t[k]), "ok")
-										for _, f in ipairs({ "line", "terminal", "station",
-												"stationGroup", "cargoType", "targetEntity",
-												"sourceEntity", "nextLine", "arrivalTime" }) do
-											local okF, v = pcall(function() return comp[f] end)
-											if okF and v ~= nil then
-												log("      ." .. f, "=", tostring(v))
-											end
-										end
-									end
-								end
-							end
-						end
-						break
-					end
-				end
-			end
-
-			if not state.probedTerminalCargo then
-				log("  !! nothing from any id -- staying armed")
-			end
-			log("=========== CARGO ON MEMBER PROBE END ===========")
-		end
 
 		-- PASSENGERS GET THEIR OWN PER-LINE ROWS.
 		--
@@ -3073,27 +2794,49 @@ local function showEntityPanel(entityId, kind, entity, mouseX, mouseY)
 				shown = shown + 1
 			end
 
-			-- One row per commodity. The amount is exact (cargoWaiting); the
-			-- line beside it is shown only where it is unambiguous.
+			-- One row per commodity: icon and exact amount, NO line.
+			--
+			-- Which line a waiting item belongs to is not obtainable. Every
+			-- route was probed and each fails for a understood reason -- see
+			-- "Per-station attribution" in API-NOTES. Inferring it from what
+			-- vehicles happen to hold produced a label that was right most of
+			-- the time and quietly wrong the rest, with no way for a player to
+			-- tell which. A number with no label beats a number with a label
+			-- you cannot trust.
+			--
+			-- The lines serving the station are listed below instead, which is
+			-- a question that DOES have a stable answer.
 			for i = 1, #rows do
 				if not (haveLinePax and rows[i].id == "PASSENGERS") then
-					local dest = byCargo[rows[i].id]
 					layout:addItem(buildStationCargoRow(
-						rows[i].id, rows[i].amount, dest))
+						rows[i].id, rows[i].amount))
 					shown = shown + 1
-
-					-- Name every line handling this commodity here.
-					local subRows = buildCargoLineList(dest)
-					for j = 1, #subRows do
-						layout:addItem(subRows[j])
-						shown = shown + 1
-					end
 				end
 			end
 
 			if freightTotal > 0 then
 				layout:addItem(buildDivider())
 			end
+		end
+
+		-- WHICH LINES SERVE THIS STATION.
+		--
+		-- The question the per-commodity labels were trying and failing to
+		-- answer, asked in the form that HAS an answer. A line stopping here is
+		-- a fact from the line-stop data; which line a given crate is queued
+		-- for is not recorded anywhere.
+		--
+		-- Freight only. On a passenger station the per-line rows above already
+		-- name every line and give it a count, so repeating them here would be
+		-- the same list twice.
+		if not haveLinePax and #lines > 0 then
+			layout:addItem(buildLabelRow(_("Lines")))
+			shown = shown + 1
+			for i = 1, math.min(#lines, MAX_STATION_LINES) do
+				layout:addItem(buildLineNameRow(lines[i]))
+				shown = shown + 1
+			end
+			layout:addItem(buildDivider())
 		end
 
 		-- Throughput summary under the list.

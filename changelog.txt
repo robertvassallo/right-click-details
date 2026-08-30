@@ -18,8 +18,21 @@ FIXED
   six of eight on a test save were carrying nothing - so carriers
   appeared and vanished between clicks, and goods nobody happened to
   be hauling showed no line at all. It now reads what each line's
-  vehicles are CONFIGURED to carry, which does not change when a
-  train runs empty.
+  vehicles are set up to carry, which survives a train running
+  empty and is right far more often.
+
+  It is still a GUESS, and this is worth understanding because the
+  panel cannot flag it. A wagon set to "auto" - which is most of
+  them - reports only the cargo it is currently allotted to, so a
+  line that hauls tools every day but has no tools allotted right
+  now will not be named for tools. That is not hypothetical: it is
+  exactly what a test station did, naming its line for bricks and
+  grain while showing "--" for the tools sitting beside them.
+
+  So read the line beside a commodity as likely, not certain, and
+  the amount beside it as exact. Every route to a definite answer
+  has been tried and none exists - the game works it out from
+  routing rather than storing it anywhere a mod can read.
 
   A station serving more than ten lines had the extras discarded
   BEFORE the lookup ran, not just before the list was drawn. A ten-
@@ -31,9 +44,8 @@ FIXED
 
   Finally the vehicle check itself sampled only the first few trains
   on a line. A line's fifth train can be set up differently from its
-  first, so a commodity's only carrier was dropped at random - a row
-  naming its line correctly one minute and showing "--" the next.
-  Every train is read now.
+  first, so a commodity's only carrier was dropped at random. Every
+  train is read now.
 
 * The panel no longer runs off the edge of the screen. It was always
   placed below and right of the cursor with no bounds check, so a

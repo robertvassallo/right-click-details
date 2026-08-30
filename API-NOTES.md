@@ -162,6 +162,40 @@ walk into a confident zero rather than an error. Resolve each id through
 The only route left is `simCargoAtTerminalSystem`, which wants a transport
 network entity -- and nothing yields one, see below.
 
+**Waiting cargo cannot be tied to a line. Every route is closed:**
+
+    getSimCargosForLine      in-transit cargo only; 436/436 and 395/395 with
+                             vehicleUsed=true, none waiting
+    SIM_CARGO.sourceEntity   the ORIGIN industry, not a location
+    getSimCargosForSource    returns EMPTY for every station, group and member
+                             alike -- a station is never a cargo "source". It
+                             does not error; the old note saying so was wrong
+    StationTerminal          reachable (see below) but carries only `tag`,
+                             `personNodes`, `personEdges` -- nothing about cargo
+    simCargoAtTerminalSystem getCount/getEntity/getPlace answer for no
+                             combination of station id, member id, terminal
+                             index 0..n or cargo type. Only getMaxCount is
+                             documented as working and it has never produced a
+                             figure in the panel either
+    vehicle `capacities`     the CURRENT auto-allocation of a fixed total, not a
+                             configuration -- 143 LOGS + 130 PLANKS summing to
+                             the vehicle's 273. Churns as trains load
+    vehicle `allCapacities`  what the wagon type can physically hold: all 16
+                             cargo types for a boxcar, though genuinely
+                             restrictive for specialised stock
+    vehicle `loadConfig`     `{ -1 }` -- auto -- on every vehicle checked, so
+                             there is no static per-line cargo setup to read
+
+The game's own station window DOES group waiting cargo by line, so it computes
+the association from routing rather than storing it. Nothing a mod can read
+holds it. Inferring it from `capacities` is right most of the time and silently
+wrong the rest; if you ship that, say so in the description.
+
+**The STATION component reads on the MEMBER station**, not the group:
+`getComponent(member, ComponentType.STATION).terminals` returns StationTerminal
+userdata (8 at one station, 4 at another). The older claim that it was nil on
+both is what closed off this whole area from v1.6 onward.
+
 **Passengers.** `SIM_PERSON` has no `sourceEntity` at all. Probed and ruled out,
 all against a live save:
 

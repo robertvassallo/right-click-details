@@ -188,8 +188,14 @@ That file contains null bytes, so plain `grep` reports nothing and exits 1 —
 use `grep -a`.
 
 The repo lives outside the staging area; `./deploy.sh` copies only the shipping
-subset in, keeping `.git/`, `tools/`, `PLAN.md`, `API-NOTES.md`, `README.md` and
-`LICENSE` out of anything published. `--dry` previews.
+subset in, keeping `.git/`, `tools/`, `media/`, `PLAN.md`, `API-NOTES.md`,
+`README.md` and `LICENSE` out of anything published. `--dry` previews.
+
+It runs `--delete-excluded`, not just `--delete`. Plain `--exclude` makes rsync
+ignore a path, so `--delete` will not remove a copy already sitting in staging —
+adding `media/` to the excludes changed nothing on its own and left 7.7MB of
+screenshots ready to upload. Any exclude added later is retroactive because of
+that flag.
 
 ## Known gaps
 

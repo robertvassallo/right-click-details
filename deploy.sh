@@ -17,12 +17,23 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --delete matters: it removes files from staging that were deleted in the repo,
 # so the two cannot silently drift apart.
-ARGS=(-a --delete)
+#
+# --delete-excluded matters just as much, and less obviously. Plain --exclude
+# makes rsync IGNORE a path, which means --delete will not remove a copy that is
+# already in staging: adding media/ to the excludes below changed nothing on its
+# own, and 7.7MB of screenshots sat there ready to upload. --delete-excluded is
+# what actually removes them, and it makes an added exclude retroactive rather
+# than only applying to a fresh staging folder.
+ARGS=(-a --delete --delete-excluded)
 [[ "${1:-}" == "--dry" ]] && ARGS+=(--dry-run --itemize-changes)
 
 # EXCLUDES -- development-only, must never reach the Workshop.
 #   .git/ .gitignore   version control
 #   tools/             icon generators and a parked API probe; dev-only
+#   media/             README screenshots -- 7.7MB of the 8.5MB total, and not
+#                      referenced by anything that ships. Workshop preview
+#                      images are uploaded separately, so nothing on the store
+#                      page needs these in the mod folder
 #   PLAN.md            internal notes
 #   .luarc.json        editor config
 #   deploy.sh          this script
@@ -35,6 +46,7 @@ rsync "${ARGS[@]}" \
   --exclude '.git/' \
   --exclude '.gitignore' \
   --exclude 'tools/' \
+  --exclude 'media/' \
   --exclude 'PLAN.md' \
   --exclude 'API-NOTES.md' \
   --exclude 'README.md' \
